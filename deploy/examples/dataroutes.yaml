@@ -1,0 +1,34 @@
+apiVersion: ingestion.sneaksanddata.com/v1alpha1
+kind: DataRoute
+metadata:
+  name: consumer1
+spec:
+  consumerId: consumer1
+---
+apiVersion: ingestion.sneaksanddata.com/v1alpha1
+kind: DataRoute
+metadata:
+  name: consumer2
+spec:
+  consumerId: consumer2
+  payloadSchema: |
+    {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Consumer2Event",
+      "type": "object",
+      "required": ["id", "timestamp", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    }
