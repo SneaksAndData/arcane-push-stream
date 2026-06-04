@@ -8,10 +8,16 @@ import java.io.{File, FileNotFoundException}
 import arcane.ingestion.common.ApplicationError
 import arcane.ingestion.common.ApplicationError._
 
-case class ServerConfig(host: String, port: Int, nThreads: Int)
+case class ServerConfig(host: String, port: Int, nThreads: Int, maxContentLengthBytes: Long)
 case class RouterConfig(apiVersion: String)
+case class DynamoDBConfig(
+    region: String,
+    tableName: String,
+    endpoint: Option[String] = None,
+    autoCreateTable: Boolean = false
+)
 
-case class AppConfig(server: ServerConfig, router: RouterConfig)
+case class AppConfig(server: ServerConfig, router: RouterConfig, dynamodb: DynamoDBConfig)
 
 object AppConfig {
 
@@ -51,10 +57,21 @@ object AppConfig {
                 server = ServerConfig(
                   host = toml.getString("server.host"),
                   port = toml.getLong("server.port").toInt,
-                  nThreads = toml.getLong("server.nThreads").toInt
+                  nThreads = toml.getLong("server.nThreads").toInt,
+                  maxContentLengthBytes =
+                    if toml.contains("server.maxContentLengthBytes") then toml.getLong("server.maxContentLengthBytes")
+                    else 400L * 1024L
                 ),
                 router = RouterConfig(
                   apiVersion = toml.getString("router.api_version")
+                ),
+                dynamodb = DynamoDBConfig(
+                  region = toml.getString("dynamodb.region"),
+                  tableName = toml.getString("dynamodb.tableName"),
+                  endpoint = Option(toml.getString("dynamodb.endpoint")),
+                  autoCreateTable =
+                    if toml.contains("dynamodb.autoCreateTable") then toml.getBoolean("dynamodb.autoCreateTable")
+                    else false
                 )
               )
             }

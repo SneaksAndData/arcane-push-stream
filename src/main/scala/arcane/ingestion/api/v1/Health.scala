@@ -26,3 +26,22 @@ object HealthEndpoint {
     )
   )
 }
+
+object ReadinessEndpoint {
+  val endpoint = Endpoint(Method.GET / "ready")
+    .out[String](Status.Ok)
+    .outError[String](Status.ServiceUnavailable)
+    .tag("system")
+
+  val routes: Routes[ReadinessSignal, Response] = Routes(
+    endpoint.implementHandler(
+      handler(
+        (for
+          ready <- ReadinessSignal.isReady
+          out   <- if ready then ZIO.succeed("ready") else ZIO.fail("not ready")
+        yield out)
+          @@ LogAspect.logSpan("get-ready")
+      )
+    )
+  )
+}

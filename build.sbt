@@ -47,9 +47,9 @@ lazy val root = project
       file("deploy/crds/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
-      "com.moandjiezana.toml"          % "toml4j"                % "0.7.2",
-      "com.coralogix"                 %% "zio-k8s-client"        % "3.1.2",
-      "com.networknt"                  % "json-schema-validator" % "1.5.3",
+      "com.moandjiezana.toml" % "toml4j"                % "0.7.2",
+      "com.coralogix"        %% "zio-k8s-client"        % "3.1.2",
+      "com.networknt"         % "json-schema-validator" % "1.5.3",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // json-schema-validator transitively brings SnakeYAML 2.x, whose SafeConstructor signature changed.
       "org.yaml"                       % "snakeyaml"             % "1.33",
@@ -63,6 +63,8 @@ lazy val root = project
       "dev.zio"                       %% "zio-schema"            % "1.8.5",
       "dev.zio"                       %% "zio-schema-derivation" % "1.8.5",
       "dev.zio"                       %% "zio-streams"           % zioVersion,
+      "dev.zio"                       %% "zio-dynamodb"          % "1.0.0-RC25",
+
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
       "dev.zio" %% "zio-schema-zio-test" % "1.8.5"        % Test,

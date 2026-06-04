@@ -2,7 +2,17 @@
 host = "0.0.0.0"
 port = 8085
 nThreads = 2
+# Maximum accepted request body size in bytes. Requests above this are rejected with 413.
+maxContentLengthBytes = 409600
 
 [router]
 # Routed-data API version, becomes part of the HTTP POST prefix: /api/<apiVersion>/<consumer>/data.
 api_version = "v2"
+
+[dynamodb]
+region = "us-east-1"
+tableName = "arcane-ingestion-tokens"
+# Override endpoint for Localstack/dev. Remove or comment out in production to use real AWS.
+endpoint = "http://localhost:4566"
+# Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).
+autoCreateTable = true

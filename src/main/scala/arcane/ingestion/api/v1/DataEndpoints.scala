@@ -3,6 +3,7 @@ package arcane.ingestion.api.v1
 
 import zio.*
 import zio.http.*
+import zio.http.codec.{HttpCodec, PathCodec}
 import zio.http.codec.PathCodec.{string, trailing}
 import zio.http.endpoint.*
 import zio.stream.ZStream
@@ -63,6 +64,15 @@ object DynamicServer:
     Endpoint(Method.POST / "api" / string("apiVersion") / string("producerId") / "data")
       .in[String]
       .out[String]
+      .outErrors[AppError](
+        HttpCodec.error[SerializationError](Status.BadRequest),
+        HttpCodec.error[SchemaValidationError](Status.BadRequest),
+        HttpCodec.error[NoContentError](Status.BadRequest),
+        HttpCodec.error[LengthRequiredError](Status.LengthRequired),
+        HttpCodec.error[ConentLengthTooLargeError](Status.RequestEntityTooLarge),
+        HttpCodec.error[ConnectionError](Status.InternalServerError),
+        HttpCodec.error[DataWriteError](Status.InternalServerError)
+      )
       .tag("user")
 
   val routes: Routes[RouteRegistry, Response] =
@@ -76,50 +86,101 @@ object DynamicServer:
 object RouteLoader:
   def build(
       apiVersion: String,
+      maxContentLengthBytes: Long,
       endpoints: List[EndpointConfig],
-      queueService: QueueService
-  ): Routes[Any, Response] =
-    Routes
-      .fromIterable(endpoints.map(endpointRoute(apiVersion, _)))
-      .provideEnvironment(ZEnvironment(queueService))
-
-  private def endpointRoute(apiVersion: String, cfg: EndpointConfig): Route[QueueService, Response] =
-    val compiledSchema: Option[JsonSchema] =
-      cfg.payloadSchema.flatMap { raw =>
-        SchemaCompiler.compile(raw) match
-          case Right(s) => Some(s)
-          case Left(err) =>
-            // Bad schema → log and skip validation for this route rather than failing the rebuild.
-            println(s"[RouteLoader] invalid payloadSchema for ${cfg.producerId}: ${err.getMessage}")
-            None
+      queueService: RequestService
+  ): UIO[Routes[Any, Response]] =
+    ZIO
+      .foreach(endpoints) { cfg =>
+        cfg.payloadSchema match
+          case None => ZIO.succeed(cfg -> Option.empty[JsonSchema])
+          case Some(raw) =>
+            SchemaCompiler.compile(raw) match
+              case Right(s) => ZIO.succeed(cfg -> Some(s))
+              case Left(err) =>
+                ZIO
+                  .logWarning(
+                    s"[RouteLoader] invalid payloadSchema for ${cfg.producerId}: ${err.getMessage}"
+                  )
+                  .as(cfg -> Option.empty[JsonSchema])
+      }
+      .map { compiled =>
+        Routes
+          .fromIterable(
+            compiled.map((cfg, schema) => endpointRoute(apiVersion, maxContentLengthBytes, cfg, schema))
+          )
+          .provideEnvironment(ZEnvironment(queueService))
       }
 
+  private def appErrorToResponse(maxContentLengthBytes: Long)(err: AppError): Response = err match
+    case SerializationError(c)         => Response.text(s"Invalid payload: $c").status(Status.BadRequest)
+    case SchemaValidationError(c)      => Response.text(s"Schema validation failed: $c").status(Status.BadRequest)
+    case ConnectionError(c)            => Response.text(s"Persistence connection error: $c").status(Status.InternalServerError)
+    case DataWriteError(c)             => Response.text(s"Persistence write error: $c").status(Status.InternalServerError)
+    case ConentLengthTooLargeError(l)  => Response.text(s"Payload too large: $l bytes (max $maxContentLengthBytes)").status(Status.RequestEntityTooLarge)
+    case LengthRequiredError()         => Response.text("Content-Length header is required").status(Status.LengthRequired)
+    case NoContentError()              => Response.text("Request body is required").status(Status.BadRequest)
+    case ContentEncodingError(t)       => Response.text(t).status(Status.BadRequest)
+    case ContentTypeError()            => Response.text("Only application/json is accepted").status(Status.UnsupportedMediaType)
+    case AccessDeniedError()           => Response.status(Status.Forbidden)
+    case ParseError()                  => Response.text("Parse error").status(Status.BadRequest)
+
+  private def classifyPersistenceError(t: Throwable): AppError =
+    DataWriteError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName))
+
+  /* blueprint for the data ingestion endpoint.
+   *
+   * Validate the request to the associated schema (CRD for now) and save the payload to persistent storage.
+   *
+   * Throws:
+   * - SerializationError    - invalid payload                               - 400 BadRequest
+   * - SchemaValidationError - payload validation failed                     - 400 BadRequest (with reason)
+   * - ConnectionError       - e.g.: AWSClient lost connection               - 500 InternalServerError
+   * - DataWriteError        - Could not persist the data (AwsDynamoDBError) - 500 InternalServerError
+   * - 411 Length Required (Content-Length header is mandatory)
+   * - 413 content Too Large (Content larger than 400kB)
+   * */
+  private def endpointRoute(
+      apiVersion: String,
+      maxContentLengthBytes: Long,
+      cfg: EndpointConfig,
+      compiledSchema: Option[JsonSchema]
+  ): Route[RequestService, Response] =
     Method.POST / "api" / apiVersion / cfg.producerId / "data" ->
       handler { (req: Request) =>
-        (for
-          body <- req.body.asString.orDie
-          _    <- ZIO.logInfo(s"handling stuff for ${cfg.producerId}")
-          _    <- compiledSchema match
-                    case None => ZIO.unit
-                    case Some(schema) =>
-                      val violations = schema.validate(body, InputFormat.JSON).asScala.toList
-                      ZIO.when(violations.nonEmpty)(
-                        ZIO.fail(
-                          Response
-                            .text(violations.map(_.getMessage).mkString("; "))
-                            .status(Status.BadRequest)
-                        )
-                      )
-          isValid <- ZIO
-            .serviceWithZIO[QueueService](_.enqueueToken(body, cfg.producerId))
-            .orDieWith(e => new RuntimeException(s"enqueue failed: $e"))
-          _ <- ZIO.logInfo(s"enqueue result for ${cfg.producerId}: $isValid")
-        yield
-          if isValid then Response.text(s"ok for ${cfg.producerId}: $body")
-          else Response.status(Status.InternalServerError))
-          .merge
-          @@ LogAspect.logSpan(cfg.producerId) @@ LogAspect
-            .logAnnotateCorrelationId(req)
+        val handled: ZIO[RequestService, AppError, Response] =
+          for
+            contentLength <- ZIO
+              .fromOption(req.header(Header.ContentLength).map(_.length))
+              .orElseFail(LengthRequiredError())
+            _ <- ZIO
+              .fail(ConentLengthTooLargeError(contentLength))
+              .when(contentLength > maxContentLengthBytes)
+            _ <- ZIO
+              .fail(NoContentError())
+              .when(contentLength <= 0)
+            body <- req.body.asString.mapError(e => SerializationError(e.getMessage))
+            _ <- ZIO
+              .fail(NoContentError())
+              .when(body.isEmpty)
+            _ <- compiledSchema match
+              case None => ZIO.unit
+              case Some(schema) =>
+                val violations = schema.validate(body, InputFormat.JSON).asScala.toList
+                ZIO
+                  .fail(SchemaValidationError(violations.map(_.getMessage).mkString("; ")))
+                  .when(violations.nonEmpty)
+            isValid <- ZIO
+              .serviceWithZIO[RequestService](_.enqueueToken(body, cfg.producerId))
+              .mapError(classifyPersistenceError)
+            _ <- ZIO.logInfo(s"enqueue result for ${cfg.producerId}: $isValid")
+          yield
+            if isValid then Response.text(s"ok for ${cfg.producerId}: $body")
+            else Response.status(Status.InternalServerError)
+
+        handled
+          .catchAll(err => ZIO.succeed(appErrorToResponse(maxContentLengthBytes)(err)))
+          @@ LogAspect.logSpan(cfg.producerId) @@ LogAspect.logAnnotateCorrelationId(req)
       }
 
 /*
@@ -127,12 +188,16 @@ object RouteLoader:
  * The layer that should be injected in the Main app.
  */
 object DynamicRoutingApp:
-  val reloader: ZIO[RouteRegistry & EndpointConfigSource & AppConfig & QueueService & Scope, Nothing, Unit] =
+  val reloader: ZIO[RouteRegistry & EndpointConfigSource & AppConfig & RequestService & Scope, Nothing, Unit] =
     for {
       app   <- ZIO.service[AppConfig]
-      queue <- ZIO.service[QueueService]
+      queue <- ZIO.service[RequestService]
       _ <- EndpointConfigSource.watch
-        .mapZIO(cfgs => RouteRegistry.set(RouteLoader.build(app.router.apiVersion, cfgs, queue)))
+        .mapZIO(cfgs =>
+          RouteLoader
+            .build(app.router.apiVersion, app.server.maxContentLengthBytes, cfgs, queue)
+            .flatMap(RouteRegistry.set)
+        )
         .runDrain
         .forkScoped
     } yield ()

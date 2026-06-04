@@ -32,7 +32,8 @@ object Main extends ZIOAppDefault {
       title = "Arcane Ingestion API",
       version = "2.0.0",
       DynamicServer.endpoint,
-      HealthEndpoint.endpoint
+      HealthEndpoint.endpoint,
+      ReadinessEndpoint.endpoint
     )
   private val swaggerRoutes = SwaggerUI.routes("docs" / "openapi", openAPI)
 
@@ -50,6 +51,7 @@ object Main extends ZIOAppDefault {
           _ <- Server.serve(
             swaggerRoutes
               ++ HealthEndpoint.routes
+              ++ ReadinessEndpoint.routes
               ++ DynamicServer.routes
           )
         } yield ())
@@ -70,6 +72,9 @@ object Main extends ZIOAppDefault {
         RouteRegistry.live,
         Server.live,
         HealthService.live,
-        QueueServiceLive.live
+        ReadinessSignal.live,
+        RequestServiceLive.live,
+        DynamoDBServiceLive.live,
+        ZLayer.fromFunction((c: AppConfig) => c.dynamodb)
       )
 }
