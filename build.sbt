@@ -74,6 +74,26 @@ lazy val root = project
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Force SnakeYAML 1.x for circe-yaml compatibility (see comment above on library deps).
     dependencyOverrides += "org.yaml" % "snakeyaml" % "1.33",
+    // Align Netty across zio-http (4.1.x) and AWS netty-nio-client (4.2.x).
+    // In Netty 4.2 the monolithic `netty-codec` artifact was split into `netty-codec-base`
+    // + `netty-codec-compression` (and others). If both 4.1 `netty-codec` and 4.2 `netty-codec-base`
+    // are on the classpath, sbt-assembly fails with duplicate class entries (e.g.
+    // io/netty/handler/codec/base64/Base64.class). Force everything to 4.2.x and drop the
+    // obsolete `netty-codec` jar — its classes now live in the split artifacts.
+    dependencyOverrides ++= Seq(
+      "io.netty" % "netty-common"                      % "4.2.14.Final",
+      "io.netty" % "netty-buffer"                      % "4.2.14.Final",
+      "io.netty" % "netty-transport"                   % "4.2.14.Final",
+      "io.netty" % "netty-transport-native-unix-common" % "4.2.14.Final",
+      "io.netty" % "netty-resolver"                    % "4.2.14.Final",
+      "io.netty" % "netty-handler"                     % "4.2.14.Final",
+      "io.netty" % "netty-handler-proxy"               % "4.2.14.Final",
+      "io.netty" % "netty-codec-base"                  % "4.2.14.Final",
+      "io.netty" % "netty-codec-compression"           % "4.2.14.Final",
+      "io.netty" % "netty-codec-http"                  % "4.2.14.Final",
+      "io.netty" % "netty-codec-http2"                 % "4.2.14.Final"
+    ),
+    excludeDependencies += "io.netty" % "netty-codec",
     // needed to gracefully shutdown the server after `sbt run`
     run / fork         := true,
     run / connectInput := true,
