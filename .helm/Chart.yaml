@@ -1,0 +1,9 @@
+apiVersion: v2
+name: arcane-push-stream
+description: HTTP-to-Queue ingestion service driven by ZIO
+
+type: application
+
+version: 0.0.0
+
+appVersion: 0.0.0

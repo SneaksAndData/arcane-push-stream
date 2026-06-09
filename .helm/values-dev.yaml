@@ -1,0 +1,39 @@
+# Local development overrides.
+# Usage:
+#   helm install arcane-ingestion .helm -f .helm/values.yaml -f .helm/values-dev.yaml
+# or with -n <namespace> as needed.
+
+environment: "Development"
+
+image:
+  repository: "app"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+replicaCount: 1
+
+# Point DynamoDB at a local Localstack instance and auto-create the table.
+settings:
+  dynamodb:
+    region: "us-east-1"
+    tableName: "arcane-ingestion-tokens"
+    endpoint: "http://localstack.default.svc.cluster.local:4566"
+    autoCreateTable: true
+
+# Localstack uses dummy credentials; supply them via env for the AWS SDK.
+extraEnv:
+  - name: AWS_ACCESS_KEY_ID
+    value: "test"
+  - name: AWS_SECRET_ACCESS_KEY
+    value: "test"
+  - name: AWS_REGION
+    value: "us-east-1"
+
+# Loosen resource defaults for laptops.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "app.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" $ | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" $ | nindent 8 }}
+      annotations:
+        # Trigger a rollout when the rendered application.toml changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.additionalAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "app.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ include "app.name" . }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ include "app.image" . }}"
+          imagePullPolicy: "{{ .Values.image.pullPolicy }}"
+          ports:
+            - name: http
+              containerPort: {{ .Values.settings.server.port }}
+              protocol: TCP
+          env:
+            - name: ENVIRONMENT
+              value: {{ .Values.environment | quote }}
+            - name: APPLICATION_VERSION
+              value: "{{ (default (printf "v%s" .Chart.AppVersion) .Values.image.tag) }}"
+            - name: ARCANE_INGESTION_CONFIG
+              value: /etc/arcane-ingestion/application.toml
+            {{- if .Values.resourceNamespace }}
+            - name: RESOURCE_NAMESPACE
+              value: {{ .Values.resourceNamespace | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.settings.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.settings.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.settings.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.settings.probes.liveness.timeoutSeconds }}
+            successThreshold: {{ .Values.settings.probes.liveness.successThreshold }}
+            failureThreshold: {{ .Values.settings.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.settings.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.settings.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.settings.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.settings.probes.readiness.timeoutSeconds }}
+            successThreshold: {{ .Values.settings.probes.readiness.successThreshold }}
+            failureThreshold: {{ .Values.settings.probes.readiness.failureThreshold }}
+          {{- if .Values.settings.probes.startup.enabled }}
+          startupProbe:
+            httpGet:
+              path: {{ .Values.settings.probes.startup.path }}
+              port: http
+            periodSeconds: {{ .Values.settings.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.settings.probes.startup.failureThreshold }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/arcane-ingestion
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "app.configMapName" . }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

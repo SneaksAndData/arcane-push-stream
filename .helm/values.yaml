@@ -1,0 +1,195 @@
+environment: "Production"
+
+image:
+  # Repository to pull the image from
+  repository: "ghcr.io/sneaksanddata/arcane-ingestion"
+
+  # Tag to pull (defaults to the chart appVersion)
+  tag: ""
+
+  # Image pull policy
+  pullPolicy: "IfNotPresent"
+
+# Image pull secrets for private repositories
+imagePullSecrets: []
+
+# Override the application name
+nameOverride: ""
+
+# Fullname override
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+
+  # Specifies whether a service account should be created
+  create: true
+
+  # Annotations to add to the service account
+  annotations: {}
+
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+### Role Based Access Control configuration
+rbac:
+
+  clusterRole:
+
+    # Allows the ingestion service to watch DataRoute custom resources cluster-wide.
+    dataRouteViewer:
+      additionalLabels: {}
+      additionalAnnotations: {}
+      create: true
+      nameOverride: ""
+
+  # This parameter determines whether role-binding resources need to be created.
+  clusterRoleBindings:
+    additionalLabels: {}
+    additionalAnnotations: {}
+    create: true
+
+# Whether to install the DataRoute CustomResourceDefinition as part of the release.
+# Set to false when the CRD is managed out-of-band (e.g. by a separate cluster bootstrap).
+crds:
+  install: true
+  # Additional labels/annotations to attach to the CRD object.
+  additionalLabels: {}
+  additionalAnnotations: {}
+
+# Additional labels for the deployment and pods
+additionalLabels: {}
+# Example:
+#
+#  app.my-company.com/name: arcane-ingestion
+#  app.my-company.com/component: ingestion
+
+# Additional annotations for the deployment and pods
+additionalAnnotations: {}
+
+# Extra environment variables to set in the deployment
+extraEnv: []
+# Example:
+#
+#  - name: AWS_REGION
+#    value: us-east-1
+
+# Extra environment variables referencing a ConfigMap or Secret
+extraEnvFrom: []
+# Example (AWS credentials sourced from a Secret):
+#
+#  - secretRef:
+#      name: arcane-ingestion-aws-credentials
+
+# Extra volumes to add to the deployment
+extraVolumes: []
+# Example:
+#
+#  - name: data-volume
+#    emptyDir:
+#      sizeLimit: 500Mi
+
+# Extra volume mounts to add to the container
+extraVolumeMounts: []
+# Example:
+#
+#  - mountPath: /data
+#    name: data-volume
+
+# Resource constraints. Empty by default to allow easier first deployment.
+resources: {}
+# Example:
+#
+#  requests:
+#    cpu: 100m
+#    memory: 256Mi
+#  limits:
+#    cpu: 1
+#    memory: 1Gi
+
+# Number of replicas. Note: the service is currently stateless and safe to scale horizontally,
+# but each replica independently watches the same CRDs.
+replicaCount: 1
+
+# Deployment strategy.
+strategy:
+  type: RollingUpdate
+
+# Tolerations for pod assignment
+tolerations: []
+
+# Node affinity rules for pod assignment
+affinity: {}
+
+# Pod-level security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Kubernetes Service exposing the HTTP endpoint
+service:
+  type: ClusterIP
+  annotations: {}
+
+# Application settings. Rendered into a ConfigMap and mounted as /etc/arcane-ingestion/application.toml.
+# The container is started with ARCANE_INGESTION_CONFIG pointing at that file.
+settings:
+
+  server:
+    host: "0.0.0.0"
+    port: 8085
+    nThreads: 2
+    # Maximum request body size in bytes. Requests above this are rejected with 413.
+    maxContentLengthBytes: 409600
+
+  router:
+    # Routed-data API version prefix: POST /api/<apiVersion>/<consumerId>/data
+    apiVersion: "v2"
+
+  dynamodb:
+    region: "us-east-1"
+    tableName: "arcane-ingestion-tokens"
+    # Optional endpoint override (e.g. Localstack). Leave empty to use real AWS.
+    endpoint: ""
+    # Whether to create the table on startup if missing. Recommended false in production.
+    autoCreateTable: false
+
+  # Health probe configuration (rendered into the Deployment's probes)
+  probes:
+    liveness:
+      path: /health
+      initialDelaySeconds: 10
+      periodSeconds: 30
+      timeoutSeconds: 5
+      successThreshold: 1
+      failureThreshold: 10
+    readiness:
+      path: /ready
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 6
+    startup:
+      enabled: true
+      path: /ready
+      periodSeconds: 5
+      failureThreshold: 30
+
+# Namespace whose DataRoute CRs this instance should watch. If empty, watches all namespaces.
+resourceNamespace: ""

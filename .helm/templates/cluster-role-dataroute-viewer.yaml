@@ -1,0 +1,25 @@
+{{- if .Values.rbac.clusterRole.dataRouteViewer.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "app.clusterRole.dataRouteViewer" . }}
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    {{- include "app.labels" $ | nindent 4 }}
+    {{- with .Values.rbac.clusterRole.dataRouteViewer.additionalLabels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.rbac.clusterRole.dataRouteViewer.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups:
+      - ingestion.sneaksanddata.com
+    resources:
+      - dataroutes
+    verbs:
+      - get
+      - list
+      - watch
+{{- end }}
