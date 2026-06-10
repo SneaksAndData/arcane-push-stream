@@ -21,7 +21,7 @@ spec:
       labels:
         {{- include "app.labels" $ | nindent 8 }}
       annotations:
-        # Trigger a rollout when the rendered application.toml changes.
+        # Trigger a rollout when the rendered application.yaml changes.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- with .Values.additionalAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -54,7 +54,7 @@ spec:
             - name: APPLICATION_VERSION
               value: "{{ (default (printf "v%s" .Chart.AppVersion) .Values.image.tag) }}"
             - name: ARCANE_INGESTION_CONFIG
-              value: /etc/arcane-ingestion/application.toml
+              value: /etc/arcane-ingestion/application.yaml
             {{- if .Values.resourceNamespace }}
             - name: RESOURCE_NAMESPACE
               value: {{ .Values.resourceNamespace | quote }}

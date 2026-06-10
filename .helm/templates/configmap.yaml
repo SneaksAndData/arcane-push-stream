@@ -9,22 +9,24 @@ metadata:
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-# todo: rewrite the config handler, so it accepts envvars
+# Application configuration is rendered as YAML and mounted into the pod.
+# Environment variables prefixed with ARCANE_INGESTION_ override these values per-field
+# at runtime (see CONFIG_ENV_PREFIX to change the prefix).
 data:
-  application.toml: |
-    [server]
-    host = {{ .Values.settings.server.host | quote }}
-    port = {{ .Values.settings.server.port }}
-    nThreads = {{ .Values.settings.server.nThreads }}
-    maxContentLengthBytes = {{ .Values.settings.server.maxContentLengthBytes }}
+  application.yaml: |
+    server:
+      host: {{ .Values.settings.server.host | quote }}
+      port: {{ .Values.settings.server.port }}
+      nThreads: {{ .Values.settings.server.nThreads }}
+      maxContentLengthBytes: {{ .Values.settings.server.maxContentLengthBytes }}
 
-    [router]
-    api_version = {{ .Values.settings.router.apiVersion | quote }}
+    router:
+      apiVersion: {{ .Values.settings.router.apiVersion | quote }}
 
-    [dynamodb]
-    region = {{ .Values.settings.dynamodb.region | quote }}
-    tableName = {{ .Values.settings.dynamodb.tableName | quote }}
-    {{- if .Values.settings.dynamodb.endpoint }}
-    endpoint = {{ .Values.settings.dynamodb.endpoint | quote }}
-    {{- end }}
-    autoCreateTable = {{ .Values.settings.dynamodb.autoCreateTable }}
+    dynamodb:
+      region: {{ .Values.settings.dynamodb.region | quote }}
+      tableName: {{ .Values.settings.dynamodb.tableName | quote }}
+      {{- if .Values.settings.dynamodb.endpoint }}
+      endpoint: {{ .Values.settings.dynamodb.endpoint | quote }}
+      {{- end }}
+      autoCreateTable: {{ .Values.settings.dynamodb.autoCreateTable }}

@@ -17,8 +17,6 @@ import zio.http.codec.PathCodec.path
 import zio.http.endpoint.openapi.*
 import zio.http.netty.NettyConfig
 
-/*----------------------MAIN------------------------*/
-
 object Main extends ZIOAppDefault {
 
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
@@ -57,7 +55,7 @@ object Main extends ZIOAppDefault {
         } yield ())
       }
       .onInterrupt(ZIO.logInfo("Shutting down gracefully..."))
-      .provide(
+      .provideSome[ZIOAppArgs](
         AppConfig.layer,
         k8sDefault,
         DataRoutes.live,
@@ -77,4 +75,6 @@ object Main extends ZIOAppDefault {
         DynamoDBServiceLive.live,
         ZLayer.fromFunction((c: AppConfig) => c.dynamodb)
       )
+      .tapError(err => ZIO.logError(s"Fatal startup error: ${err.getMessage}"))
+      .exitCode
 }

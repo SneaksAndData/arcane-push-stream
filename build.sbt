@@ -47,7 +47,6 @@ lazy val root = project
       file("deploy/crds/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
-      "com.moandjiezana.toml" % "toml4j"                % "0.7.2",
       "com.coralogix"        %% "zio-k8s-client"        % "3.1.2",
       "com.networknt"         % "json-schema-validator" % "1.5.3",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
@@ -58,6 +57,7 @@ lazy val root = project
       "dev.zio"                       %% "zio"                   % zioVersion,
       "dev.zio"                       %% "zio-config"            % "4.0.7",
       "dev.zio"                       %% "zio-config-magnolia"   % "4.0.7",
+      "dev.zio"                       %% "zio-config-yaml"       % "4.0.7",
       "dev.zio"                       %% "zio-http"              % zioHttpVersion,
       "dev.zio"                       %% "zio-json"              % "0.9.2",
       "dev.zio"                       %% "zio-schema"            % "1.8.5",

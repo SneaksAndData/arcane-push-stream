@@ -2,6 +2,7 @@
  *
  * The idea is to build a map for the list of producers from the CRDs:
  * and use a `watchForever` stream to check all sorts of changes.
+ *
  * */
 package arcane.ingestion.api.v1
 

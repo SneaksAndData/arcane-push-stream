@@ -6,6 +6,7 @@ import software.amazon.awssdk.auth.credentials.{
   DefaultCredentialsProvider,
   StaticCredentialsProvider
 }
+import software.amazon.awssdk.core.exception.SdkClientException
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.dynamodb.model.ResourceNotFoundException
 import zio.*
@@ -97,7 +98,7 @@ object DynamoDBServiceLive:
   /** if the Table doesn't exist and 'autoCreateTable = true', create the tabe, otherwise throw IllegalStateException
     */
   private def ensureTable(dynamo: DynamoDb, cfg: DynamoDBConfig): IO[Throwable, Unit] =
-    tableExists(dynamo, cfg.tableName).flatMap {
+    val check = tableExists(dynamo, cfg.tableName).flatMap {
       case true => ZIO.logInfo(s"DynamoDB table present: ${cfg.tableName}")
       case false if cfg.autoCreateTable =>
         ZIO.logInfo(s"DynamoDB table ${cfg.tableName} missing — creating (autoCreateTable=true)") *>
@@ -109,6 +110,25 @@ object DynamoDBServiceLive:
           )
         )
     }
+
+    check
+      .tapError {
+        case sdk: SdkClientException =>
+          ZIO.logError(
+            s"Cannot reach DynamoDB at ${cfg.endpoint.getOrElse("<aws-default>")} " +
+              s"(region=${cfg.region}, table=${cfg.tableName}): ${sdk.getMessage}"
+          )
+        case other =>
+          ZIO.logError(s"DynamoDB initialisation failed: ${other.getMessage}")
+      }
+      .refineOrDie {
+        case sdk: SdkClientException =>
+          new IllegalStateException(
+            s"DynamoDB endpoint ${cfg.endpoint.getOrElse("<aws-default>")} is unreachable: ${sdk.getMessage}",
+            sdk
+          )
+        case other => other
+      }
 
   private val serviceLayer: ZLayer[DynamoDb & DynamoDBConfig & ReadinessSignal, Throwable, PersistenceService] =
     ZLayer.fromZIO {

@@ -83,7 +83,7 @@ Generate the DataRoute viewer ClusterRole name
 {{- end }}
 
 {{/*
-Name of the ConfigMap holding the rendered application.toml
+Name of the ConfigMap holding the rendered application.yaml
 */}}
 {{- define "app.configMapName" -}}
 {{- printf "%s-config" (include "app.fullname" .) }}

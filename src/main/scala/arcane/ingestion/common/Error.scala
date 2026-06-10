@@ -15,7 +15,7 @@ sealed trait ApplicationError extends Exception {
 
 object ApplicationError {
 
-  /** Raised when the TOML configuration file contains invalid syntax or missing keys. */
+  /** Raised when the YAML configuration file contains invalid syntax or missing keys. */
   case class ConfigurationParsingError(message: String, cause: Option[Throwable] = None) extends ApplicationError
 
   /** Raised when the configuration file cannot be loaded (e.g. file not found, permissions). */

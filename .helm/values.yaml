@@ -146,8 +146,12 @@ service:
   type: ClusterIP
   annotations: {}
 
-# Application settings. Rendered into a ConfigMap and mounted as /etc/arcane-ingestion/application.toml.
+# Application settings. Rendered into a ConfigMap and mounted as /etc/arcane-ingestion/application.yaml.
 # The container is started with ARCANE_INGESTION_CONFIG pointing at that file.
+# Settings can be overridden by an environment variable. ARCANE_INGESTION__SERVER__PORT=9090 takes
+# precedence over settings.server.port below.
+#
+# The prefix itself is configurable via CONFIG_ENV_PREFIX (default: ARCANE_INGESTION).
 settings:
 
   server:
