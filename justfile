@@ -22,6 +22,11 @@ check:
 docker-build version="latest":
     docker build -f .container/Dockerfile -t {{ IMAGE_NAME }}:{{ version }} .
 
+[doc("Run in kind: rebuild and load image, upgrade chart")]
+docker-up: docker-build
+    kind load docker-image {{ IMAGE_NAME }}:latest --name {{ CLUSTER_NAME }}
+    helm upgrade --install arcane-ingestion .helm -f .helm/values.yaml -f .helm/values-dev.yaml
+
 [doc("Create kind cluster, build docker image and install helm chart")]
 up: docker-build && info
     kind create cluster --name {{ CLUSTER_NAME }}

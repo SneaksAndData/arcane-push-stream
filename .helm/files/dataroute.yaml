@@ -1,0 +1,75 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  # name must match the spec fields below, and be in the form: <plural>.<group>
+  name: dataroutes.ingestion.sneaksanddata.com
+spec:
+  # group name to use for REST API: /apis/<group>/<version>
+  group: ingestion.sneaksanddata.com
+  scope: Namespaced
+  names:
+    plural: dataroutes
+    singular: dataroute
+    kind: DataRoute
+    shortNames:
+      - dr
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - consumerId
+                - schemaSubject
+                - schemaVersion
+              properties:
+                consumerId:
+                  type: string
+                  description: |
+                    Identifier of the consumer this route belongs to. Determines the URL path
+                    segment exposed by the ingestion server, i.e.
+                    POST /api/<apiVersion>/<consumerId>/data
+                  pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
+                  minLength: 1
+                  maxLength: 63
+                payloadSchema:
+                  type: string
+                  description: |
+                    Optional Apache Avro schema (a record schema), serialized as a JSON string,
+                    that incoming request payloads for this route must validate against before
+                    being enqueued. The server parses this string into an Avro Schema once at
+                    load time, then for each request:
+                      1. parses the JSON body using Avro's JSON decoder against this schema
+                         (this both validates the payload and produces a GenericRecord),
+                      2. encodes the GenericRecord to Avro binary,
+                      3. stores the resulting bytes in the DynamoDB `payload` (Binary) attribute.
+                    If set, `schemaSubject` and `schemaVersion` must also be provided so the
+                    downstream parquet writer can resolve the writer schema.
+                  minLength: 1
+                schemaSubject:
+                  type: string
+                  description: |
+                    Logical name of the Avro schema family bound to this route (e.g. "orders").
+                    Persisted as the DynamoDB `schemaSubject` attribute on every item so the
+                    downstream consumer can route to the correct schema family.
+                  pattern: '^[a-zA-Z_][a-zA-Z0-9_.-]{0,127}$'
+                  minLength: 1
+                  maxLength: 128
+                schemaVersion:
+                  type: integer
+                  description: |
+                    Monotonically increasing version of the Avro schema within `schemaSubject`.
+                    Persisted as the DynamoDB `schemaVersion` (Number) attribute on every item.
+                  minimum: 1
+      additionalPrinterColumns:
+        - name: Consumer
+          type: string
+          jsonPath: .spec.consumerId
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

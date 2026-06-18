@@ -1,8 +1,16 @@
+{{- /*
+  This file is read by the sbt build (see `externalCustomResourceDefinitions`
+  in build.sbt) to generate the typed Kubernetes client.
+*/ -}}
 {{- if .Values.crds.install -}}
-apiVersion: apiextensions.k8s.io/v1
-kind: CustomResourceDefinition
+{{- $crd := .Files.Get "files/dataroute.yaml" | fromYaml -}}
+{{- if not $crd -}}
+{{- fail "Could not read .helm/files/dataroute.yaml — chart is missing the canonical CRD source" -}}
+{{- end -}}
+apiVersion: {{ $crd.apiVersion }}
+kind: {{ $crd.kind }}
 metadata:
-  name: dataroutes.ingestion.sneaksanddata.com
+  name: {{ $crd.metadata.name }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
     {{- with .Values.crds.additionalLabels }}
@@ -13,47 +21,5 @@ metadata:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  group: ingestion.sneaksanddata.com
-  scope: Namespaced
-  names:
-    plural: dataroutes
-    singular: dataroute
-    kind: DataRoute
-    shortNames:
-      - dr
-  versions:
-    - name: v1alpha1
-      served: true
-      storage: true
-      schema:
-        openAPIV3Schema:
-          type: object
-          properties:
-            spec:
-              type: object
-              required:
-                - consumerId
-              properties:
-                consumerId:
-                  type: string
-                  description: |
-                    Identifier of the consumer this route belongs to. Determines the URL path
-                    segment exposed by the ingestion server, i.e.
-                    POST /api/<apiVersion>/<consumerId>/data
-                  pattern: '^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$'
-                  minLength: 1
-                  maxLength: 63
-                payloadSchema:
-                  type: string
-                  description: |
-                    Optional JSON Schema (Draft 2020-12), serialized as a string, that incoming
-                    request payloads for this route must validate against before being enqueued.
-                  minLength: 1
-      additionalPrinterColumns:
-        - name: Consumer
-          type: string
-          jsonPath: .spec.consumerId
-        - name: Age
-          type: date
-          jsonPath: .metadata.creationTimestamp
+  {{- toYaml $crd.spec | nindent 2 }}
 {{- end }}

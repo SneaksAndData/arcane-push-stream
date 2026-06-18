@@ -44,13 +44,14 @@ lazy val root = project
       srcs
     },
     externalCustomResourceDefinitions := Seq(
-      file("deploy/crds/dataroute.yaml")
+      file(".helm/files/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
       "com.coralogix"        %% "zio-k8s-client"        % "3.1.2",
-      "com.networknt"         % "json-schema-validator" % "1.5.3",
+      "org.apache.avro"       % "avro"                  % "1.11.4",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
-      // json-schema-validator transitively brings SnakeYAML 2.x, whose SafeConstructor signature changed.
+      // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
+      // whose SafeConstructor signature changed.
       "org.yaml"                       % "snakeyaml"             % "1.33",
       "com.softwaremill.sttp.client3" %% "slf4j-backend"         % "3.9.8",
       "org.slf4j"                      % "slf4j-simple"          % "2.0.16",

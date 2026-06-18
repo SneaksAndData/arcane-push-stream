@@ -4,6 +4,8 @@ metadata:
   name: consumer1
 spec:
   consumerId: consumer1
+  schemaSubject: consumer1-raw
+  schemaVersion: 1
 ---
 apiVersion: ingestion.sneaksanddata.com/v1alpha1
 kind: DataRoute
@@ -11,24 +13,15 @@ metadata:
   name: consumer2
 spec:
   consumerId: consumer2
+  schemaSubject: consumer2-event
+  schemaVersion: 1
   payloadSchema: |
     {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "title": "Consumer2Event",
-      "type": "object",
-      "required": ["id", "timestamp", "payload"],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "timestamp": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "payload": {
-          "type": "object"
-        }
-      }
+      "type": "record",
+      "name": "Consumer2Event",
+      "namespace": "com.sneaksanddata.ingestion",
+      "fields": [
+        { "name": "id",      "type": "string" },
+        { "name": "payload", "type": { "type": "map", "values": "string" } }
+      ]
     }

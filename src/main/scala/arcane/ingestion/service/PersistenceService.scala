@@ -1,6 +1,7 @@
 package arcane.ingestion.service
 
 import arcane.ingestion.config.DynamoDBConfig
+import arcane.ingestion.api.v1.SchemaRef
 import software.amazon.awssdk.auth.credentials.{
   AwsBasicCredentials,
   DefaultCredentialsProvider,
@@ -21,22 +22,42 @@ import java.net.URI
 import java.util.UUID
 
 trait PersistenceService:
-  def enqueueToken(payload: String, producer: String): IO[Throwable, Boolean]
+  def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean]
 
 final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extends PersistenceService:
 
-  def enqueueToken(payload: String, producer: String): IO[Throwable, Boolean] =
+  def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
     for
       id  <- ZIO.succeed(UUID.randomUUID().toString)
       now <- Clock.instant
-      item = Map(
+      baseItem = Map(
         AttributeName("producer") -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
         AttributeName("id")       -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
-        AttributeName("payload")  -> AttributeValue(s = Optional.Present(StringAttributeValue(payload))),
+        // payload is Avro-binary bytes (or raw UTF-8 JSON for routes with no payloadSchema) —
+        // stored as a DynamoDB Binary attribute so the downstream parquet writer can decode it
+        // with the matching Avro schema.
+        AttributeName("payload") -> AttributeValue(b =
+          Optional.Present(BinaryAttributeValue(zio.Chunk.fromArray(payload)))
+        ),
         AttributeName("createdAt") -> AttributeValue(n =
           Optional.Present(NumberAttributeValue(now.toEpochMilli.toString))
+        ),
+        // schemaSubject / schemaVersion identify the writer schema for the downstream router.
+        // They are required by the CRD so always present.
+        AttributeName("schemaSubject") -> AttributeValue(s =
+          Optional.Present(StringAttributeValue(schemaRef.subject))
+        ),
+        AttributeName("schemaVersion") -> AttributeValue(n =
+          Optional.Present(NumberAttributeValue(schemaRef.version.toString))
         )
       )
+      // schemaFingerprint is only present for routes that have an Avro payloadSchema bound;
+      // raw-JSON fallback routes omit it (nothing to fingerprint).
+      item = schemaRef.fingerprint.fold(baseItem) { fp =>
+        baseItem + (AttributeName("schemaFingerprint") -> AttributeValue(s =
+          Optional.Present(StringAttributeValue(fp))
+        ))
+      }
       _ <- dynamo
         .putItem(PutItemRequest(tableName = TableArn(tableName), item = item))
         .mapError(_.toThrowable)

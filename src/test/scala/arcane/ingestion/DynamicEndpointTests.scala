@@ -4,7 +4,7 @@ import zio._
 import zio.test._
 import zio.test.Assertion._
 import zio.http._
-import arcane.ingestion.api.v1.{EndpointConfig, RouteLoader, RouteRegistry}
+import arcane.ingestion.api.v1.{EndpointConfig, RouteLoader, RouteRegistry, SchemaRef}
 import arcane.ingestion.service.RequestService
 
 import scala.collection.mutable
@@ -14,12 +14,14 @@ object DynamicEndpointTests extends ZIOSpecDefault {
   private val apiVersion            = "v1"
   private val maxContentLengthBytes = 4096L
 
-  private val queue = mutable.Map.empty[String, String]
+  private val queue    = mutable.Map.empty[String, Array[Byte]]
+  private val schemas  = mutable.Map.empty[String, SchemaRef]
 
   private val fakeRequestService: RequestService = new RequestService:
-    def enqueueToken(payload: String, producer: String): IO[Throwable, Boolean] =
+    def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
       ZIO.succeed:
         queue.update(producer, payload)
+        schemas.update(producer, schemaRef)
         true
 
   private def post(path: String, payload: String = "x"): Request =
@@ -27,11 +29,18 @@ object DynamicEndpointTests extends ZIOSpecDefault {
       .post(URL(Path.root ++ Path(path)), Body.fromString(payload))
       .addHeader(Header.ContentLength(payload.length.toLong))
 
+  private def cfg(producer: String, version: Int = 1): EndpointConfig =
+    EndpointConfig(
+      producerId = producer,
+      schemaSubject = s"$producer-subject",
+      schemaVersion = version
+    )
+
   private def build(producers: String*): UIO[Routes[Any, Response]] =
     RouteLoader.build(
       apiVersion,
       maxContentLengthBytes,
-      producers.map(EndpointConfig(_)).toList,
+      producers.map(cfg(_)).toList,
       fakeRequestService
     )
 
@@ -81,13 +90,47 @@ object DynamicEndpointTests extends ZIOSpecDefault {
       )
     },
     test("successful request enqueues the payload into the queue") {
+      val body = """{"hello":"world"}"""
       for
         _      <- ZIO.succeed(queue.clear())
         routes <- build("enq-test")
-        res    <- routes.run(post("api/v1/enq-test/data", """{"hello":"world"}"""))
+        res    <- routes.run(post("api/v1/enq-test/data", body))
       yield assertTrue(
         res.status == Status.Ok,
-        queue.get("enq-test").contains("""{"hello":"world"}""")
+        queue.get("enq-test").map(new String(_, java.nio.charset.StandardCharsets.UTF_8)).contains(body)
+      )
+    },
+    test("Avro-bound route validates JSON, encodes to binary, and forwards SchemaRef") {
+      val avroSchema =
+        """{
+          |  "type": "record",
+          |  "name": "Order",
+          |  "namespace": "test",
+          |  "fields": [
+          |    { "name": "id",     "type": "string" },
+          |    { "name": "amount", "type": "int"    }
+          |  ]
+          |}""".stripMargin
+      val validJson   = """{"id":"o-1","amount":42}"""
+      val invalidJson = """{"id":"o-1","amount":"not-a-number"}"""
+      val cfg = EndpointConfig(
+        producerId = "avro-test",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = Some(avroSchema)
+      )
+      for
+        _      <- ZIO.succeed(queue.clear())
+        _      <- ZIO.succeed(schemas.clear())
+        routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), fakeRequestService)
+        okRes  <- routes.run(post("api/v1/avro-test/data", validJson))
+        badRes <- routes.run(post("api/v1/avro-test/data", invalidJson))
+      yield assertTrue(
+        okRes.status == Status.Ok,
+        // Avro binary is smaller than the JSON it was decoded from.
+        queue.get("avro-test").exists(b => b.length > 0 && b.length < validJson.length),
+        schemas.get("avro-test").exists(r => r.subject == "orders" && r.version == 3 && r.fingerprint.exists(_.nonEmpty)),
+        badRes.status == Status.BadRequest
       )
     }
   )

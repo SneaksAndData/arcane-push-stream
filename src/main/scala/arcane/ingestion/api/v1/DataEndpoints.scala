@@ -7,24 +7,31 @@ import zio.http.codec.{HttpCodec, PathCodec}
 import zio.http.codec.PathCodec.{string, trailing}
 import zio.http.endpoint.*
 import zio.stream.ZStream
-import com.networknt.schema.{InputFormat, JsonSchema, JsonSchemaFactory, SpecVersion}
-import scala.jdk.CollectionConverters.*
 import scala.util.Try
 import arcane.ingestion.service.*
 import arcane.ingestion.Models.*
 import arcane.ingestion.common.LogAspect
 import arcane.ingestion.config.AppConfig
 
-final case class EndpointConfig(producerId: String, payloadSchema: Option[String] = None)
+final case class EndpointConfig(
+    producerId: String,
+    schemaSubject: String,
+    schemaVersion: Int,
+    payloadSchema: Option[String] = None
+)
 
-/** Pre-compiles JSON Schema documents and caches the compiled [[JsonSchema]] for fast per-request validation. */
+/** Identity of the writer schema bound to a route, persisted alongside every record so the
+  * downstream parquet writer can resolve the writer schema. `subject` and `version` come from
+  * the CRD (always present). `fingerprint` is the CRC-64-AVRO parsing fingerprint of the
+  * compiled Avro schema; absent for routes without a `payloadSchema`.
+  */
+final case class SchemaRef(subject: String, version: Int, fingerprint: Option[String])
+
+/** Pre-compiles Avro schema documents and caches the compiled [[CompiledAvroSchema]] for fast per-request validation. */
 object SchemaCompiler:
-  private val factory: JsonSchemaFactory =
-    JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
-
-  /** Compile a JSON Schema document. Returns `Left(error)` if the schema text is malformed. */
-  def compile(schemaJson: String): Either[Throwable, JsonSchema] =
-    Try(factory.getSchema(schemaJson)).toEither
+  /** Compile an Avro schema document. Returns `Left(error)` if the schema text is malformed. */
+  def compile(schemaJson: String): Either[Throwable, CompiledAvroSchema] =
+    AvroSchemaCompiler.compile(schemaJson)
 
 /** Live source of the dynamic endpoint list.
   *
@@ -92,22 +99,29 @@ object RouteLoader:
   ): UIO[Routes[Any, Response]] =
     ZIO
       .foreach(endpoints) { cfg =>
+        val baseRef = SchemaRef(cfg.schemaSubject, cfg.schemaVersion, fingerprint = None)
         cfg.payloadSchema match
-          case None => ZIO.succeed(cfg -> Option.empty[JsonSchema])
+          case None =>
+            // No Avro schema bound → no validation, but the SchemaRef from the CRD is still
+            // attached to every record so the downstream router knows where the bytes belong.
+            ZIO.succeed(cfg -> (Option.empty[CompiledAvroSchema], baseRef))
           case Some(raw) =>
             SchemaCompiler.compile(raw) match
-              case Right(s) => ZIO.succeed(cfg -> Some(s))
+              case Right(s) =>
+                ZIO.succeed(cfg -> (Some(s), baseRef.copy(fingerprint = Some(s.fingerprint))))
               case Left(err) =>
                 ZIO
                   .logWarning(
-                    s"[RouteLoader] invalid payloadSchema for ${cfg.producerId}: ${err.getMessage}"
+                    s"[RouteLoader] invalid Avro payloadSchema for ${cfg.producerId}: ${err.getMessage} — disabling validation for this route"
                   )
-                  .as(cfg -> Option.empty[JsonSchema])
+                  .as(cfg -> (Option.empty[CompiledAvroSchema], baseRef))
       }
       .map { compiled =>
         Routes
           .fromIterable(
-            compiled.map((cfg, schema) => endpointRoute(apiVersion, maxContentLengthBytes, cfg, schema))
+            compiled.map { case (cfg, (schema, ref)) =>
+              endpointRoute(apiVersion, maxContentLengthBytes, cfg, schema, ref)
+            }
           )
           .provideEnvironment(ZEnvironment(queueService))
       }
@@ -144,7 +158,8 @@ object RouteLoader:
       apiVersion: String,
       maxContentLengthBytes: Long,
       cfg: EndpointConfig,
-      compiledSchema: Option[JsonSchema]
+      compiledSchema: Option[CompiledAvroSchema],
+      schemaRef: SchemaRef
   ): Route[RequestService, Response] =
     Method.POST / "api" / apiVersion / cfg.producerId / "data" ->
       handler { (req: Request) =>
@@ -163,19 +178,24 @@ object RouteLoader:
             _ <- ZIO
               .fail(NoContentError())
               .when(body.isEmpty)
-            _ <- compiledSchema match
-              case None => ZIO.unit
+            // Avro path: validate by decoding JSON against the schema, then re-encode as binary.
+            // No schema configured: persist the raw JSON bytes unchanged.
+            payloadBytes <- compiledSchema match
+              case None =>
+                ZIO.succeed(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
               case Some(schema) =>
-                val violations = schema.validate(body, InputFormat.JSON).asScala.toList
                 ZIO
-                  .fail(SchemaValidationError(violations.map(_.getMessage).mkString("; ")))
-                  .when(violations.nonEmpty)
+                  .fromEither(schema.validateAndEncode(body))
+                  .mapError(t => SchemaValidationError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName)))
             isValid <- ZIO
-              .serviceWithZIO[RequestService](_.enqueueToken(body, cfg.producerId))
+              .serviceWithZIO[RequestService](_.enqueueToken(payloadBytes, cfg.producerId, schemaRef))
               .mapError(classifyPersistenceError)
-            _ <- ZIO.logInfo(s"enqueue result for ${cfg.producerId}: $isValid")
+            _ <- ZIO.logInfo(
+              s"enqueue result for ${cfg.producerId}: $isValid (${payloadBytes.length} bytes, " +
+                s"schema=${schemaRef.subject}:v${schemaRef.version})"
+            )
           yield
-            if isValid then Response.text(s"ok for ${cfg.producerId}: $body")
+            if isValid then Response.text(s"ok for ${cfg.producerId}: ${payloadBytes.length} bytes")
             else Response.status(Status.InternalServerError)
 
         handled

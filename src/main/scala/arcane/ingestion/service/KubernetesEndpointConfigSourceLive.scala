@@ -80,7 +80,12 @@ object KubernetesEndpointConfigSourceLive:
       meta <- cr.metadata.toOption
       name <- meta.name.toOption
       spec <- cr.spec.toOption
-    yield acc + (name -> EndpointConfig(spec.consumerId, spec.payloadSchema.toOption))).getOrElse(acc)
+    yield acc + (name -> EndpointConfig(
+      producerId = spec.consumerId,
+      schemaSubject = spec.schemaSubject,
+      schemaVersion = spec.schemaVersion.toInt,
+      payloadSchema = spec.payloadSchema.toOption
+    ))).getOrElse(acc)
 
   private def remove(
       acc: Map[String, EndpointConfig],

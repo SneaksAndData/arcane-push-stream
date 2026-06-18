@@ -6,7 +6,7 @@
 environment: "Development"
 
 image:
-  repository: "app"
+  repository: "arcane-push-stream"
   tag: "latest"
   pullPolicy: "IfNotPresent"
 
