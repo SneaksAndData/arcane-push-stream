@@ -19,6 +19,9 @@ import zio.aws.netty.NettyHttpClient
 import zio.prelude.data.Optional
 
 import java.net.URI
+import java.nio.charset.StandardCharsets
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 trait PersistenceService:
@@ -30,20 +33,21 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extend
     for
       id  <- ZIO.succeed(UUID.randomUUID().toString)
       now <- Clock.instant
+      // timestampUTC is a lexicographically-ordered ISO-8601 offset datetime (always UTC) used as the table RANGE key.
+      // The downstream arcane-stream-pull plugin polls by `producer = X AND timestampUTC > $lastSeen`,
+      // so ordering must match chronological order.
+      timestampUTC = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).toString
+      // The plugin expects `payload` to be a UTF-8 JSON string (either a single object or an array of objects),
+      // not Avro-binary. Callers therefore must POST JSON; we just transcode the bytes verbatim.
+      payloadJson = new String(payload, StandardCharsets.UTF_8)
       baseItem = Map(
-        AttributeName("producer") -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
-        AttributeName("id")       -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
-        // payload is Avro-binary bytes (or raw UTF-8 JSON for routes with no payloadSchema) —
-        // stored as a DynamoDB Binary attribute so the downstream parquet writer can decode it
-        // with the matching Avro schema.
-        AttributeName("payload") -> AttributeValue(b =
-          Optional.Present(BinaryAttributeValue(zio.Chunk.fromArray(payload)))
-        ),
+        AttributeName("producer")     -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
+        AttributeName("timestampUTC") -> AttributeValue(s = Optional.Present(StringAttributeValue(timestampUTC))),
+        AttributeName("id")           -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
+        AttributeName("payload")      -> AttributeValue(s = Optional.Present(StringAttributeValue(payloadJson))),
         AttributeName("createdAt") -> AttributeValue(n =
           Optional.Present(NumberAttributeValue(now.toEpochMilli.toString))
         ),
-        // schemaSubject / schemaVersion identify the writer schema for the downstream router.
-        // They are required by the CRD so always present.
         AttributeName("schemaSubject") -> AttributeValue(s =
           Optional.Present(StringAttributeValue(schemaRef.subject))
         ),
@@ -51,8 +55,6 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extend
           Optional.Present(NumberAttributeValue(schemaRef.version.toString))
         )
       )
-      // schemaFingerprint is only present for routes that have an Avro payloadSchema bound;
-      // raw-JSON fallback routes omit it (nothing to fingerprint).
       item = schemaRef.fingerprint.fold(baseItem) { fp =>
         baseItem + (AttributeName("schemaFingerprint") -> AttributeValue(s =
           Optional.Present(StringAttributeValue(fp))
@@ -99,15 +101,18 @@ object DynamoDBServiceLive:
         CreateTableRequest(
           attributeDefinitions = Optional.Present(
             List(
+              // HASH key: producer identity (caller-provided)
               AttributeDefinition(KeySchemaAttributeName("producer"), ScalarAttributeType.S),
-              AttributeDefinition(KeySchemaAttributeName("id"), ScalarAttributeType.S)
+              // RANGE key: ISO-8601 UTC timestamp string. Lexicographic order matches chronological order,
+              // so the arcane-stream-pull plugin can poll with `producer = X AND timestampUTC > $lastSeen`.
+              AttributeDefinition(KeySchemaAttributeName("timestampUTC"), ScalarAttributeType.S)
             )
           ),
           tableName = TableArn(tableName),
           keySchema = Optional.Present(
             List(
               KeySchemaElement(KeySchemaAttributeName("producer"), KeyType.HASH),
-              KeySchemaElement(KeySchemaAttributeName("id"), KeyType.RANGE)
+              KeySchemaElement(KeySchemaAttributeName("timestampUTC"), KeyType.RANGE)
             )
           ),
           billingMode = Optional.Present(BillingMode.PAY_PER_REQUEST)
