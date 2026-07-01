@@ -66,6 +66,67 @@ spec:
                     Monotonically increasing version of the Avro schema within `schemaSubject`.
                     Persisted as the DynamoDB `schemaVersion` (Number) attribute on every item.
                   minimum: 1
+                iceberg:
+                  type: object
+                  description: |
+                    Optional Iceberg target table definition. When set, the ingestion service
+                    ensures the referenced table exists in the REST catalog at startup (and
+                    whenever a new DataRoute is observed). Tables are created idempotently:
+                    if the table already exists, the spec is left untouched. Schema-evolution
+                    checks are intentionally deferred — this initial implementation only handles
+                    the create-if-missing case.
+                  required: [catalogUri, warehouse, namespace, tableName, columns]
+                  properties:
+                    catalogUri:
+                      type: string
+                      description: REST catalog endpoint URI (e.g. http://lakekeeper:20001/catalog).
+                      minLength: 1
+                    warehouse:
+                      type: string
+                      description: Warehouse identifier registered in the catalog.
+                      minLength: 1
+                    namespace:
+                      type: string
+                      description: Namespace under which the table is created (must already exist).
+                      minLength: 1
+                    tableName:
+                      type: string
+                      description: Table name within the namespace.
+                      pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
+                      minLength: 1
+                      maxLength: 128
+                    columns:
+                      type: array
+                      description: |
+                        Ordered list of columns. Field-ids are assigned sequentially starting
+                        at 1 in declaration order; do not change ordering after creation.
+                      minItems: 1
+                      items:
+                        type: object
+                        required: [name, type]
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          type:
+                            type: string
+                            description: |
+                              Logical Iceberg type. Supported values:
+                              string, int, long, double, float, boolean, binary, date,
+                              timestamp (UTC-adjusted).
+                            enum: [string, int, long, double, float, boolean, binary, date, timestamp]
+                          required:
+                            type: boolean
+                            default: false
+                    initialProperties:
+                      type: object
+                      description: |
+                        Optional key/value table properties seeded once at creation time
+                        (e.g. `comment` to bootstrap the stream-pull plugin's watermark).
+                        Ignored if the table already exists. Keys and values are passed
+                        verbatim to Iceberg's UpdateProperties API.
+                      additionalProperties:
+                        type: string
       additionalPrinterColumns:
         - name: Consumer
           type: string

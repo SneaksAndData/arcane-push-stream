@@ -168,7 +168,7 @@ settings:
   dynamodb:
     region: "us-east-1"
     tableName: "arcane-ingestion-tokens"
-    # Optional endpoint override (e.g. Localstack). Leave empty to use real AWS.
+    # Optional endpoint override (e.g. dynamodb-local for tests). Leave empty to use real AWS.
     endpoint: ""
     # Whether to create the table on startup if missing. Recommended false in production.
     autoCreateTable: false

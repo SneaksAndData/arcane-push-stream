@@ -1,7 +1,10 @@
-# Local development overrides.
+# Local development / kind e2e overrides.
 # Usage:
 #   helm install arcane-ingestion .helm -f .helm/values.yaml -f .helm/values-dev.yaml
-# or with -n <namespace> as needed.
+#
+# Assumes the shared kind data plane from arcane-stream-pull is already applied
+# to the same namespace (provides an in-cluster `dynamodb-local` Service):
+#   (cd ../arcane-stream-pull && just kind-data-up)
 
 environment: "Development"
 
@@ -12,20 +15,22 @@ image:
 
 replicaCount: 1
 
-# Point DynamoDB at a local Localstack instance and auto-create the table.
+# Point DynamoDB at the in-cluster dynamodb-local and auto-create the table
+# on startup (dynamodb-local runs with -inMemory, so the table vanishes on pod
+# restart — the ingestion service must recreate it).
 settings:
   dynamodb:
     region: "us-east-1"
-    tableName: "arcane-ingestion-tokens"
-    endpoint: "http://localstack.default.svc.cluster.local:4566"
+    tableName: "arcane_ingestion"
+    endpoint: "http://dynamodb-local.default.svc.cluster.local:8000"
     autoCreateTable: true
 
-# Localstack uses dummy credentials; supply them via env for the AWS SDK.
+# dynamodb-local accepts any credentials; supply dummies via env for the AWS SDK.
 extraEnv:
   - name: AWS_ACCESS_KEY_ID
-    value: "test"
+    value: "minioadmin"
   - name: AWS_SECRET_ACCESS_KEY
-    value: "test"
+    value: "minioadmin"
   - name: AWS_REGION
     value: "us-east-1"
 
@@ -37,3 +42,4 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
