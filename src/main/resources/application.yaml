@@ -12,7 +12,7 @@ router:
 dynamodb:
   region: "us-east-1"
   tableName: "arcane-ingestion-tokens"
-  # Override endpoint for Localstack/dev. Remove or comment out in production to use real AWS.
-  endpoint: "http://localhost:4566"
+  # Override endpoint for dynamodb-local / dev. Remove or comment out in production to use real AWS.
+  endpoint: "http://localhost:8000"
   # Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).
   autoCreateTable: true

@@ -84,8 +84,35 @@ object KubernetesEndpointConfigSourceLive:
       producerId = spec.consumerId,
       schemaSubject = spec.schemaSubject,
       schemaVersion = spec.schemaVersion.toInt,
-      payloadSchema = spec.payloadSchema.toOption
+      payloadSchema = spec.payloadSchema.toOption,
+      iceberg = toIcebergSpec(spec)
     ))).getOrElse(acc)
+
+  /** Project the generated CRD `spec.iceberg` block (if present) onto our local [[IcebergTableSpec]]. Fields declared
+    * `required` in the CRD schema arrive as plain values from codegen; only optional fields need `.toOption`.
+    */
+  private def toIcebergSpec(spec: DataRoute.Spec): Option[IcebergTableSpec] =
+    spec.iceberg.toOption.flatMap { ice =>
+      val cols = ice.columns.toSeq.map { c =>
+        IcebergColumnSpec(
+          name = c.name,
+          `type` = c.`type`.value,
+          required = c.required.toOption.getOrElse(false)
+        )
+      }
+      Option.when(cols.nonEmpty)(
+        IcebergTableSpec(
+          catalogUri = ice.catalogUri,
+          warehouse = ice.warehouse,
+          namespace = ice.namespace,
+          tableName = ice.tableName,
+          columns = cols,
+          initialProperties = ice.initialProperties.toOption
+            .map(_.iterator.toMap)
+            .getOrElse(Map.empty)
+        )
+      )
+    }
 
   private def remove(
       acc: Map[String, EndpointConfig],

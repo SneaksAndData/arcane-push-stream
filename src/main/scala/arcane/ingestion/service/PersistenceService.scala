@@ -48,9 +48,7 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extend
         AttributeName("createdAt") -> AttributeValue(n =
           Optional.Present(NumberAttributeValue(now.toEpochMilli.toString))
         ),
-        AttributeName("schemaSubject") -> AttributeValue(s =
-          Optional.Present(StringAttributeValue(schemaRef.subject))
-        ),
+        AttributeName("schemaSubject") -> AttributeValue(s = Optional.Present(StringAttributeValue(schemaRef.subject))),
         AttributeName("schemaVersion") -> AttributeValue(n =
           Optional.Present(NumberAttributeValue(schemaRef.version.toString))
         )
@@ -74,7 +72,7 @@ object DynamoDBServiceLive:
         region = Some(Region.of(cfg.region)),
         credentialsProvider =
           if cfg.endpoint.isDefined then
-            // Localstack accepts any credentials; supply static dummies when overriding the endpoint.
+            // dynamodb-local accepts any credentials; supply static dummies when overriding the endpoint.
             StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"))
           else DefaultCredentialsProvider.create(),
         endpointOverride = cfg.endpoint.map(URI.create),

@@ -7,15 +7,14 @@ import org.apache.avro.io.{DecoderFactory, EncoderFactory}
 import java.io.ByteArrayOutputStream
 import scala.util.Try
 
-/** A parsed Avro schema bundled with helpers for the request hot-path:
-  * validate an incoming JSON payload against the schema and re-encode it as Avro binary.
+/** A parsed Avro schema bundled with helpers for the request hot-path: validate an incoming JSON payload against the
+  * schema and re-encode it as Avro binary.
   *
-  * The JSON payload is expected to follow Avro's JSON encoding (nullable unions are tagged,
-  * e.g. `{"name": {"string": "x"}}`).
+  * The JSON payload is expected to follow Avro's JSON encoding (nullable unions are tagged, e.g.
+  * `{"name": {"string": "x"}}`).
   *
-  * `fingerprint` is the lower-case hex CRC-64-AVRO parsing fingerprint of the schema. It
-  * uniquely identifies the schema bytes (ignoring whitespace and field order in JSON) and
-  * is suitable for use as a content-addressed schema id.
+  * `fingerprint` is the lower-case hex CRC-64-AVRO parsing fingerprint of the schema. It uniquely identifies the schema
+  * bytes (ignoring whitespace and field order in JSON) and is suitable for use as a content-addressed schema id.
   */
 final class CompiledAvroSchema(val schema: Schema):
 
@@ -25,12 +24,10 @@ final class CompiledAvroSchema(val schema: Schema):
       .map("%02x".format(_))
       .mkString
 
-  /** Decode `jsonPayload` against this schema (this is the validation step) and re-encode
-    * the resulting record as Avro binary. Returns `Left(error)` if the JSON is malformed
-    * or does not conform to the schema.
+  /** Decode `jsonPayload` against this schema (this is the validation step) and re-encode the resulting record as Avro
+    * binary. Returns `Left(error)` if the JSON is malformed or does not conform to the schema.
     *
-    * Both reader and writer are instantiated per call to avoid sharing mutable state across
-    * concurrent requests.
+    * Both reader and writer are instantiated per call to avoid sharing mutable state across concurrent requests.
     */
   def validateAndEncode(jsonPayload: String): Either[Throwable, Array[Byte]] =
     Try {
@@ -46,9 +43,8 @@ final class CompiledAvroSchema(val schema: Schema):
       baos.toByteArray
     }.toEither
 
-/** Parses Avro schema text (the canonical JSON representation of a schema) once at route-load
-  * time. Cached per-route in [[RouteLoader]] so request handling pays only the per-call
-  * decode/encode cost.
+/** Parses Avro schema text (the canonical JSON representation of a schema) once at route-load time. Cached per-route in
+  * [[RouteLoader]] so request handling pays only the per-call decode/encode cost.
   */
 object AvroSchemaCompiler:
   def compile(schemaText: String): Either[Throwable, CompiledAvroSchema] =

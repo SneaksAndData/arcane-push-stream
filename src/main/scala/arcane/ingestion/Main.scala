@@ -73,6 +73,7 @@ object Main extends ZIOAppDefault {
         ReadinessSignal.live,
         RequestServiceLive.live,
         DynamoDBServiceLive.live,
+        IcebergProvisioner.live,
         ZLayer.fromFunction((c: AppConfig) => c.dynamodb)
       )
       .tapError(err => ZIO.logError(s"Fatal startup error: ${err.getMessage}"))

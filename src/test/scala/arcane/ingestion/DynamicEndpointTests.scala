@@ -14,8 +14,8 @@ object DynamicEndpointTests extends ZIOSpecDefault {
   private val apiVersion            = "v1"
   private val maxContentLengthBytes = 4096L
 
-  private val queue    = mutable.Map.empty[String, Array[Byte]]
-  private val schemas  = mutable.Map.empty[String, SchemaRef]
+  private val queue   = mutable.Map.empty[String, Array[Byte]]
+  private val schemas = mutable.Map.empty[String, SchemaRef]
 
   private val fakeRequestService: RequestService = new RequestService:
     def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
@@ -129,7 +129,9 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         okRes.status == Status.Ok,
         // Avro binary is smaller than the JSON it was decoded from.
         queue.get("avro-test").exists(b => b.length > 0 && b.length < validJson.length),
-        schemas.get("avro-test").exists(r => r.subject == "orders" && r.version == 3 && r.fingerprint.exists(_.nonEmpty)),
+        schemas
+          .get("avro-test")
+          .exists(r => r.subject == "orders" && r.version == 3 && r.fingerprint.exists(_.nonEmpty)),
         badRes.status == Status.BadRequest
       )
     }

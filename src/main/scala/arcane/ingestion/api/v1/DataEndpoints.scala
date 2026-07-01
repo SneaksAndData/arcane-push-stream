@@ -17,17 +17,39 @@ final case class EndpointConfig(
     producerId: String,
     schemaSubject: String,
     schemaVersion: Int,
-    payloadSchema: Option[String] = None
+    payloadSchema: Option[String] = None,
+    iceberg: Option[IcebergTableSpec] = None
 )
 
-/** Identity of the writer schema bound to a route, persisted alongside every record so the
-  * downstream parquet writer can resolve the writer schema. `subject` and `version` come from
-  * the CRD (always present). `fingerprint` is the CRC-64-AVRO parsing fingerprint of the
-  * compiled Avro schema; absent for routes without a `payloadSchema`.
+/** Iceberg target table description sourced from a `DataRoute` CRD.
+  *
+  * The [[arcane.ingestion.service.IcebergProvisioner]] uses this to ensure the referenced table exists at startup.
+  * Field-ids are assigned positionally (1..n in the order columns are declared); reordering the columns of an existing
+  * table is therefore considered a breaking change.
+  */
+final case class IcebergTableSpec(
+    catalogUri: String,
+    warehouse: String,
+    namespace: String,
+    tableName: String,
+    columns: Seq[IcebergColumnSpec],
+    initialProperties: Map[String, String] = Map.empty
+)
+
+final case class IcebergColumnSpec(
+    name: String,
+    `type`: String,
+    required: Boolean = false
+)
+
+/** Identity of the writer schema bound to a route, persisted alongside every record so the downstream parquet writer
+  * can resolve the writer schema. `subject` and `version` come from the CRD (always present). `fingerprint` is the
+  * CRC-64-AVRO parsing fingerprint of the compiled Avro schema; absent for routes without a `payloadSchema`.
   */
 final case class SchemaRef(subject: String, version: Int, fingerprint: Option[String])
 
-/** Pre-compiles Avro schema documents and caches the compiled [[CompiledAvroSchema]] for fast per-request validation. */
+/** Pre-compiles Avro schema documents and caches the compiled [[CompiledAvroSchema]] for fast per-request validation.
+  */
 object SchemaCompiler:
   /** Compile an Avro schema document. Returns `Left(error)` if the schema text is malformed. */
   def compile(schemaJson: String): Either[Throwable, CompiledAvroSchema] =
@@ -127,17 +149,18 @@ object RouteLoader:
       }
 
   private def appErrorToResponse(maxContentLengthBytes: Long)(err: AppError): Response = err match
-    case SerializationError(c)         => Response.text(s"Invalid payload: $c").status(Status.BadRequest)
-    case SchemaValidationError(c)      => Response.text(s"Schema validation failed: $c").status(Status.BadRequest)
-    case ConnectionError(c)            => Response.text(s"Persistence connection error: $c").status(Status.InternalServerError)
-    case DataWriteError(c)             => Response.text(s"Persistence write error: $c").status(Status.InternalServerError)
-    case ConentLengthTooLargeError(l)  => Response.text(s"Payload too large: $l bytes (max $maxContentLengthBytes)").status(Status.RequestEntityTooLarge)
-    case LengthRequiredError()         => Response.text("Content-Length header is required").status(Status.LengthRequired)
-    case NoContentError()              => Response.text("Request body is required").status(Status.BadRequest)
-    case ContentEncodingError(t)       => Response.text(t).status(Status.BadRequest)
-    case ContentTypeError()            => Response.text("Only application/json is accepted").status(Status.UnsupportedMediaType)
-    case AccessDeniedError()           => Response.status(Status.Forbidden)
-    case ParseError()                  => Response.text("Parse error").status(Status.BadRequest)
+    case SerializationError(c)    => Response.text(s"Invalid payload: $c").status(Status.BadRequest)
+    case SchemaValidationError(c) => Response.text(s"Schema validation failed: $c").status(Status.BadRequest)
+    case ConnectionError(c) => Response.text(s"Persistence connection error: $c").status(Status.InternalServerError)
+    case DataWriteError(c)  => Response.text(s"Persistence write error: $c").status(Status.InternalServerError)
+    case ConentLengthTooLargeError(l) =>
+      Response.text(s"Payload too large: $l bytes (max $maxContentLengthBytes)").status(Status.RequestEntityTooLarge)
+    case LengthRequiredError()   => Response.text("Content-Length header is required").status(Status.LengthRequired)
+    case NoContentError()        => Response.text("Request body is required").status(Status.BadRequest)
+    case ContentEncodingError(t) => Response.text(t).status(Status.BadRequest)
+    case ContentTypeError()  => Response.text("Only application/json is accepted").status(Status.UnsupportedMediaType)
+    case AccessDeniedError() => Response.status(Status.Forbidden)
+    case ParseError()        => Response.text("Parse error").status(Status.BadRequest)
 
   private def classifyPersistenceError(t: Throwable): AppError =
     DataWriteError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName))
@@ -208,16 +231,57 @@ object RouteLoader:
  * The layer that should be injected in the Main app.
  */
 object DynamicRoutingApp:
-  val reloader: ZIO[RouteRegistry & EndpointConfigSource & AppConfig & RequestService & Scope, Nothing, Unit] =
+  val reloader: ZIO[
+    RouteRegistry & EndpointConfigSource & AppConfig & RequestService & IcebergProvisioner & Scope,
+    Nothing,
+    Unit
+  ] =
     for {
-      app   <- ZIO.service[AppConfig]
-      queue <- ZIO.service[RequestService]
+      app         <- ZIO.service[AppConfig]
+      queue       <- ZIO.service[RequestService]
+      provisioner <- ZIO.service[IcebergProvisioner]
+      // Track producers we've already attempted to provision so subsequent CRD updates
+      // (Modified events that don't change the iceberg block) don't re-issue catalog calls.
+      // The framework's createTable is itself idempotent, but skipping known-good specs
+      // keeps the logs clean and avoids hammering the catalog REST endpoint.
+      seen <- Ref.make(Set.empty[String])
       _ <- EndpointConfigSource.watch
         .mapZIO(cfgs =>
-          RouteLoader
-            .build(app.router.apiVersion, app.server.maxContentLengthBytes, cfgs, queue)
-            .flatMap(RouteRegistry.set)
+          provisionNewTables(provisioner, seen, cfgs) *>
+            RouteLoader
+              .build(app.router.apiVersion, app.server.maxContentLengthBytes, cfgs, queue)
+              .flatMap(RouteRegistry.set)
         )
         .runDrain
         .forkScoped
     } yield ()
+
+  /** For each endpoint whose CRD declares an iceberg table, ensure the table exists via [[IcebergProvisioner]].
+    * Failures are logged and swallowed — we never let a single bad CR take down the route reloader fiber.
+    */
+  private def provisionNewTables(
+      provisioner: IcebergProvisioner,
+      seen: Ref[Set[String]],
+      cfgs: List[EndpointConfig]
+  ): UIO[Unit] =
+    ZIO.foreachDiscard(cfgs) { cfg =>
+      cfg.iceberg match
+        case None => ZIO.unit
+        case Some(spec) =>
+          for
+            alreadySeen <- seen.modify(s => (s.contains(cfg.producerId), s + cfg.producerId))
+            _ <- ZIO
+              .unless(alreadySeen) {
+                provisioner
+                  .provision(spec)
+                  .tapError(e =>
+                    ZIO.logWarningCause(
+                      s"[DynamicRoutingApp] iceberg provisioning failed for ${cfg.producerId}: ${e.getMessage}",
+                      Cause.fail(e)
+                    )
+                  )
+                  .ignore
+              }
+              .unit
+          yield ()
+    }
