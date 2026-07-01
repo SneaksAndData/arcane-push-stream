@@ -4,6 +4,21 @@ val zioHttpVersion = "3.11.2"
 ThisBuild / dynverVTagPrefix := false
 ThisBuild / dynverSeparator  := "-"
 
+// arcane-framework-scala is published to a private GitHub Packages Maven repo.
+// Pinning to the same coordinate the arcane-stream-pull plugin uses so the catalog
+// behavior the ingestion service drives stays in lock-step with what the plugin sees.
+resolvers += "Arcane framework repo" at "https://maven.pkg.github.com/SneaksAndData/arcane-framework-scala"
+
+credentials += Credentials(
+  "GitHub Package Registry",
+  "maven.pkg.github.com",
+  "_",
+  sys.env.getOrElse(
+    "GITHUB_TOKEN",
+    sys.error("GITHUB_TOKEN must be set to resolve the arcane-framework dependency from GitHub Packages")
+  )
+)
+
 lazy val root = project
   .in(file("."))
   .enablePlugins(BuildInfoPlugin, K8sCustomResourceCodegenPlugin)
@@ -47,8 +62,8 @@ lazy val root = project
       file(".helm/files/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
-      "com.coralogix"        %% "zio-k8s-client"        % "3.1.2",
-      "org.apache.avro"       % "avro"                  % "1.11.4",
+      "com.coralogix"  %% "zio-k8s-client" % "3.1.2",
+      "org.apache.avro" % "avro"           % "1.11.4",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
       // whose SafeConstructor signature changed.
@@ -66,6 +81,11 @@ lazy val root = project
       "dev.zio"                       %% "zio-streams"           % zioVersion,
       "dev.zio"                       %% "zio-dynamodb"          % "1.0.0-RC25",
 
+      // Iceberg catalog + entity-management primitives. Pinned to the same revision the
+      // arcane-stream-pull plugin uses, so tables provisioned here are structurally
+      // identical to what the plugin will read/write.
+      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-91-g7a6b7d9",
+
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
       "dev.zio" %% "zio-schema-zio-test" % "1.8.5"        % Test,
@@ -82,19 +102,24 @@ lazy val root = project
     // io/netty/handler/codec/base64/Base64.class). Force everything to 4.2.x and drop the
     // obsolete `netty-codec` jar — its classes now live in the split artifacts.
     dependencyOverrides ++= Seq(
-      "io.netty" % "netty-common"                      % "4.2.14.Final",
-      "io.netty" % "netty-buffer"                      % "4.2.14.Final",
-      "io.netty" % "netty-transport"                   % "4.2.14.Final",
+      "io.netty" % "netty-common"                       % "4.2.14.Final",
+      "io.netty" % "netty-buffer"                       % "4.2.14.Final",
+      "io.netty" % "netty-transport"                    % "4.2.14.Final",
       "io.netty" % "netty-transport-native-unix-common" % "4.2.14.Final",
-      "io.netty" % "netty-resolver"                    % "4.2.14.Final",
-      "io.netty" % "netty-handler"                     % "4.2.14.Final",
-      "io.netty" % "netty-handler-proxy"               % "4.2.14.Final",
-      "io.netty" % "netty-codec-base"                  % "4.2.14.Final",
-      "io.netty" % "netty-codec-compression"           % "4.2.14.Final",
-      "io.netty" % "netty-codec-http"                  % "4.2.14.Final",
-      "io.netty" % "netty-codec-http2"                 % "4.2.14.Final"
+      "io.netty" % "netty-resolver"                     % "4.2.14.Final",
+      "io.netty" % "netty-handler"                      % "4.2.14.Final",
+      "io.netty" % "netty-handler-proxy"                % "4.2.14.Final",
+      "io.netty" % "netty-codec-base"                   % "4.2.14.Final",
+      "io.netty" % "netty-codec-compression"            % "4.2.14.Final",
+      "io.netty" % "netty-codec-http"                   % "4.2.14.Final",
+      "io.netty" % "netty-codec-http2"                  % "4.2.14.Final"
     ),
     excludeDependencies += "io.netty" % "netty-codec",
+    // Iceberg/SnowflakeJDBC (transitively via arcane-framework) pull the obsolete monolithic
+    // `org.jline:jline:3.9.0`, which collides with the modular `jline-terminal`, `jline-reader`,
+    // and `jline-terminal-jna` 3.19.x jars (they ship the same classes). Drop the monolithic
+    // artifact; the split ones cover the same surface.
+    excludeDependencies += "org.jline" % "jline",
     // needed to gracefully shutdown the server after `sbt run`
     run / fork         := true,
     run / connectInput := true,
@@ -118,6 +143,12 @@ lazy val root = project
       case ps if ps.endsWith("logback.xml")        => MergeStrategy.discard
       case ps if ps.endsWith("module-info.class")  => MergeStrategy.discard
       case ps if ps.endsWith("package-info.class") => MergeStrategy.discard
+
+      // arcane-framework pulls multiple libs (zio-constraintless, zio-metrics-connectors-statsd, …)
+      // that each ship their own auto-generated `buildinfo/BuildInfo` class at the root package.
+      // Our own BuildInfo lives under `arcane.ingestion.BuildInfo`, so the unqualified ones are
+      // safe to drop.
+      case PathList("buildinfo", _*) => MergeStrategy.discard
 
       // unroll-annotation ships files that conflict with scala-library; prefer scala-library
       case PathList("scala", "annotation", _*) => MergeStrategy.first
