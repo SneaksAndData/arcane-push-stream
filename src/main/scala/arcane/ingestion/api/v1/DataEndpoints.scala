@@ -12,6 +12,7 @@ import arcane.ingestion.service.*
 import arcane.ingestion.Models.*
 import arcane.ingestion.common.LogAspect
 import arcane.ingestion.config.AppConfig
+import arcane.ingestion.observability.IngestionMetrics
 
 final case class EndpointConfig(
     producerId: String,
@@ -117,7 +118,8 @@ object RouteLoader:
       apiVersion: String,
       maxContentLengthBytes: Long,
       endpoints: List[EndpointConfig],
-      queueService: RequestService
+      queueService: RequestService,
+      metrics: IngestionMetrics
   ): UIO[Routes[Any, Response]] =
     ZIO
       .foreach(endpoints) { cfg =>
@@ -145,7 +147,7 @@ object RouteLoader:
               endpointRoute(apiVersion, maxContentLengthBytes, cfg, schema, ref)
             }
           )
-          .provideEnvironment(ZEnvironment(queueService))
+          .provideEnvironment(ZEnvironment(queueService, metrics))
       }
 
   private def appErrorToResponse(maxContentLengthBytes: Long)(err: AppError): Response = err match
@@ -183,10 +185,10 @@ object RouteLoader:
       cfg: EndpointConfig,
       compiledSchema: Option[CompiledAvroSchema],
       schemaRef: SchemaRef
-  ): Route[RequestService, Response] =
+  ): Route[RequestService & IngestionMetrics, Response] =
     Method.POST / "api" / apiVersion / cfg.producerId / "data" ->
       handler { (req: Request) =>
-        val handled: ZIO[RequestService, AppError, Response] =
+        val handled: ZIO[RequestService & IngestionMetrics, AppError, Response] =
           for
             contentLength <- ZIO
               .fromOption(req.header(Header.ContentLength).map(_.length))
@@ -213,6 +215,7 @@ object RouteLoader:
             isValid <- ZIO
               .serviceWithZIO[RequestService](_.enqueueToken(payloadBytes, cfg.producerId, schemaRef))
               .mapError(classifyPersistenceError)
+            _ <- IngestionMetrics.recordIngestionBytes(cfg.producerId, payloadBytes.length.toLong)
             _ <- ZIO.logInfo(
               s"enqueue result for ${cfg.producerId}: $isValid (${payloadBytes.length} bytes, " +
                 s"schema=${schemaRef.subject}:v${schemaRef.version})"
@@ -222,7 +225,12 @@ object RouteLoader:
             else Response.status(Status.InternalServerError)
 
         handled
-          .catchAll(err => ZIO.succeed(appErrorToResponse(maxContentLengthBytes)(err)))
+          .tap(resp => IngestionMetrics.recordRequest(cfg.producerId, if resp.status.isSuccess then "ok" else "error"))
+          .catchAll { err =>
+            IngestionMetrics
+              .recordRequest(cfg.producerId, "error")
+              .as(appErrorToResponse(maxContentLengthBytes)(err))
+          }
           @@ LogAspect.logSpan(cfg.producerId) @@ LogAspect.logAnnotateCorrelationId(req)
       }
 
@@ -232,7 +240,7 @@ object RouteLoader:
  */
 object DynamicRoutingApp:
   val reloader: ZIO[
-    RouteRegistry & EndpointConfigSource & AppConfig & RequestService & IcebergProvisioner & Scope,
+    RouteRegistry & EndpointConfigSource & AppConfig & RequestService & IcebergProvisioner & IngestionMetrics & Scope,
     Nothing,
     Unit
   ] =
@@ -240,6 +248,7 @@ object DynamicRoutingApp:
       app         <- ZIO.service[AppConfig]
       queue       <- ZIO.service[RequestService]
       provisioner <- ZIO.service[IcebergProvisioner]
+      metrics     <- ZIO.service[IngestionMetrics]
       // Track producers we've already attempted to provision so subsequent CRD updates
       // (Modified events that don't change the iceberg block) don't re-issue catalog calls.
       // The framework's createTable is itself idempotent, but skipping known-good specs
@@ -249,8 +258,9 @@ object DynamicRoutingApp:
         .mapZIO(cfgs =>
           provisionNewTables(provisioner, seen, cfgs) *>
             RouteLoader
-              .build(app.router.apiVersion, app.server.maxContentLengthBytes, cfgs, queue)
-              .flatMap(RouteRegistry.set)
+              .build(app.router.apiVersion, app.server.maxContentLengthBytes, cfgs, queue, metrics)
+              .flatMap(RouteRegistry.set) *>
+            metrics.recordEndpointReload(cfgs.size)
         )
         .runDrain
         .forkScoped

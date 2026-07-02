@@ -28,10 +28,37 @@ final case class DynamoDBConfig(
     autoCreateTable: Boolean = false
 )
 
+/** DogStatsD-over-Unix-Domain-Socket publisher used by the arcane-framework `DataDog.UdsPublisher`.
+  *
+  *   - `enabled`: master switch. When `false`, no publisher fiber is started and metrics stay in-memory only.
+  *   - `socketPath`: DogStatsD UDS socket path. Only read when `enabled = true`. Default matches the DataDog agent's
+  *     standard install location.
+  *   - `publisherIntervalSeconds`: how often the MetricsConfig flushes registered metrics to the socket.
+  */
+final case class DatadogConfig(
+    enabled: Boolean = false,
+    socketPath: String = "/var/run/datadog/dsd.socket",
+    publisherIntervalSeconds: Long = 5
+)
+
+/** Observability wiring shared by logging and metrics.
+  *
+  *   - `serviceName`: becomes the `stream_kind` tag on every metric (matches arcane-framework semantics for
+  *     `GlobalMetricTagProvider`) and is included in the SLF4J MDC.
+  *   - `metricTags`: static key/value tags applied to every emitted metric, e.g. deployment/environment/region.
+  *   - `datadog`: DataDog UDS publisher configuration; see [[DatadogConfig]].
+  */
+final case class ObservabilityConfig(
+    serviceName: String = "arcane-ingestion",
+    metricTags: Map[String, String] = Map.empty,
+    datadog: DatadogConfig = DatadogConfig()
+)
+
 final case class AppConfig(
     server: ServerConfig = ServerConfig(),
     router: RouterConfig = RouterConfig(),
-    dynamodb: DynamoDBConfig = DynamoDBConfig()
+    dynamodb: DynamoDBConfig = DynamoDBConfig(),
+    observability: ObservabilityConfig = ObservabilityConfig()
 )
 
 /** Build AppConfig instance from various sources. The precedence (per-property):

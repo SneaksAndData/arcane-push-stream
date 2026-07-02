@@ -16,3 +16,17 @@ dynamodb:
   endpoint: "http://localhost:8000"
   # Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).
   autoCreateTable: true
+
+observability:
+  # Identifies the service in metric tags and log MDC. Also becomes the `stream_kind` tag
+  # applied by arcane-framework's GlobalMetricTagProvider to every metric.
+  serviceName: "arcane-ingestion"
+  # Static key/value tags added to every emitted metric (deployment, environment, region, ...).
+  metricTags: {}
+  datadog:
+    # Master switch. Leave `false` locally; enable in environments where the DataDog agent is available.
+    enabled: false
+    # DogStatsD Unix-domain-socket path. Only used when `enabled: true`.
+    socketPath: "/var/run/datadog/dsd.socket"
+    # Metric flush interval to the DogStatsD socket, in seconds.
+    publisherIntervalSeconds: 5

@@ -5,6 +5,7 @@ import zio.test._
 import zio.test.Assertion._
 import zio.http._
 import arcane.ingestion.api.v1.{EndpointConfig, RouteLoader, RouteRegistry, SchemaRef}
+import arcane.ingestion.observability.IngestionMetrics
 import arcane.ingestion.service.RequestService
 
 import scala.collection.mutable
@@ -24,6 +25,12 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         schemas.update(producer, schemaRef)
         true
 
+  // Test double: metric emission is a no-op — we assert route behavior, not observability side-effects.
+  private val noopMetrics: IngestionMetrics = new IngestionMetrics:
+    def recordRequest(producer: String, status: String): UIO[Unit]        = ZIO.unit
+    def recordIngestionBytes(producer: String, bytes: Long): UIO[Unit]    = ZIO.unit
+    def recordEndpointReload(activeEndpointCount: Int): UIO[Unit]         = ZIO.unit
+
   private def post(path: String, payload: String = "x"): Request =
     Request
       .post(URL(Path.root ++ Path(path)), Body.fromString(payload))
@@ -41,7 +48,8 @@ object DynamicEndpointTests extends ZIOSpecDefault {
       apiVersion,
       maxContentLengthBytes,
       producers.map(cfg(_)).toList,
-      fakeRequestService
+      fakeRequestService,
+      noopMetrics
     )
 
   def spec = suite("Unit tests")(
@@ -122,7 +130,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
       for
         _      <- ZIO.succeed(queue.clear())
         _      <- ZIO.succeed(schemas.clear())
-        routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), fakeRequestService)
+        routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), fakeRequestService, noopMetrics)
         okRes  <- routes.run(post("api/v1/avro-test/data", validJson))
         badRes <- routes.run(post("api/v1/avro-test/data", invalidJson))
       yield assertTrue(
