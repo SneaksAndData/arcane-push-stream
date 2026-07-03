@@ -93,11 +93,12 @@ object DynamicServer:
   val endpoint =
     Endpoint(Method.POST / "api" / string("apiVersion") / string("producerId") / "data")
       .in[String]
-      .out[String]
+      .out[String](Status.Accepted)
       .outErrors[AppError](
         HttpCodec.error[SerializationError](Status.BadRequest),
         HttpCodec.error[SchemaValidationError](Status.BadRequest),
         HttpCodec.error[NoContentError](Status.BadRequest),
+        HttpCodec.error[ContentTypeError](Status.UnsupportedMediaType),
         HttpCodec.error[LengthRequiredError](Status.LengthRequired),
         HttpCodec.error[ConentLengthTooLargeError](Status.RequestEntityTooLarge),
         HttpCodec.error[ConnectionError](Status.InternalServerError),
@@ -167,6 +168,11 @@ object RouteLoader:
   private def classifyPersistenceError(t: Throwable): AppError =
     DataWriteError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName))
 
+  private def isApplicationJsonContentType(req: Request): Boolean =
+    req.rawHeader(Header.ContentType).flatMap(MediaType.forContentType).exists { mediaType =>
+      mediaType.mainType.equalsIgnoreCase("application") && mediaType.subType.equalsIgnoreCase("json")
+    }
+
   /* blueprint for the data ingestion endpoint.
    *
    * Validate the request to the associated schema (CRD for now) and save the payload to persistent storage.
@@ -190,6 +196,9 @@ object RouteLoader:
       handler { (req: Request) =>
         val handled: ZIO[RequestService & IngestionMetrics, AppError, Response] =
           for
+            _ <- ZIO
+              .fail(ContentTypeError())
+              .unless(isApplicationJsonContentType(req))
             contentLength <- ZIO
               .fromOption(req.header(Header.ContentLength).map(_.length))
               .orElseFail(LengthRequiredError())
@@ -221,7 +230,7 @@ object RouteLoader:
                 s"schema=${schemaRef.subject}:v${schemaRef.version})"
             )
           yield
-            if isValid then Response.text(s"ok for ${cfg.producerId}: ${payloadBytes.length} bytes")
+            if isValid then Response.text(s"accepted for ${cfg.producerId}: ${payloadBytes.length} bytes").status(Status.Accepted)
             else Response.status(Status.InternalServerError)
 
         handled

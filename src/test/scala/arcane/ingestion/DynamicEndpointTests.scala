@@ -34,6 +34,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
   private def post(path: String, payload: String = "x"): Request =
     Request
       .post(URL(Path.root ++ Path(path)), Body.fromString(payload))
+      .addHeader(Header.Custom("Content-Type", "application/json"))
       .addHeader(Header.ContentLength(payload.length.toLong))
 
   private def cfg(producer: String, version: Int = 1): EndpointConfig =
@@ -58,7 +59,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         routes <- build("c1")
         ok     <- routes.run(post("api/v1/c1/data"))
         miss   <- routes.run(post("api/v1/cX/data"))
-      yield assertTrue(ok.status == Status.Ok, miss.status == Status.NotFound)
+      yield assertTrue(ok.status == Status.Accepted, miss.status == Status.NotFound)
     },
     test("registry swap takes effect immediately") {
       for
@@ -70,12 +71,13 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         rs  <- reg.get
         a   <- rs.run(post("api/v1/a/data"))
         b   <- rs.run(post("api/v1/b/data"))
-      yield assertTrue(a.status == Status.NotFound, b.status == Status.Ok)
+      yield assertTrue(a.status == Status.NotFound, b.status == Status.Accepted)
     }.provide(RouteRegistry.live, Scope.default),
     test("rejects requests whose Content-Length exceeds the limit") {
       val oversize = maxContentLengthBytes + 1
       val req = Request
         .post(URL(Path.root ++ Path("api/v1/c1/data")), Body.fromString("x"))
+        .addHeader(Header.Custom("Content-Type", "application/json"))
         .addHeader(Header.ContentLength(oversize))
       for
         routes <- build("c1")
@@ -87,7 +89,9 @@ object DynamicEndpointTests extends ZIOSpecDefault {
       )
     },
     test("rejects requests without a Content-Length header") {
-      val req = Request.post(URL(Path.root ++ Path("api/v1/c1/data")), Body.fromString("x"))
+      val req = Request
+        .post(URL(Path.root ++ Path("api/v1/c1/data")), Body.fromString("x"))
+        .addHeader(Header.Custom("Content-Type", "application/json"))
       for
         routes <- build("c1")
         res    <- routes.run(req)
@@ -104,9 +108,33 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         routes <- build("enq-test")
         res    <- routes.run(post("api/v1/enq-test/data", body))
       yield assertTrue(
-        res.status == Status.Ok,
+        res.status == Status.Accepted,
         queue.get("enq-test").map(new String(_, java.nio.charset.StandardCharsets.UTF_8)).contains(body)
       )
+    },
+    test("rejects non-json Content-Type") {
+      val req = Request
+        .post(URL(Path.root ++ Path("api/v1/c1/data")), Body.fromString("""{"hello":"world"}"""))
+        .addHeader(Header.Custom("Content-Type", "text/plain"))
+        .addHeader(Header.ContentLength(17L))
+      for
+        routes <- build("c1")
+        res    <- routes.run(req)
+        body   <- res.body.asString
+      yield assertTrue(
+        res.status == Status.UnsupportedMediaType,
+        body == "Only application/json is accepted"
+      )
+    },
+    test("accepts application/json Content-Type with charset parameter") {
+      val req = Request
+        .post(URL(Path.root ++ Path("api/v1/c1/data")), Body.fromString("""{"hello":"world"}"""))
+        .addHeader(Header.Custom("Content-Type", "application/json; charset=utf-8"))
+        .addHeader(Header.ContentLength(17L))
+      for
+        routes <- build("c1")
+        res    <- routes.run(req)
+      yield assertTrue(res.status == Status.Accepted)
     },
     test("Avro-bound route validates JSON, encodes to binary, and forwards SchemaRef") {
       val avroSchema =
@@ -134,7 +162,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         okRes  <- routes.run(post("api/v1/avro-test/data", validJson))
         badRes <- routes.run(post("api/v1/avro-test/data", invalidJson))
       yield assertTrue(
-        okRes.status == Status.Ok,
+        okRes.status == Status.Accepted,
         // Avro binary is smaller than the JSON it was decoded from.
         queue.get("avro-test").exists(b => b.length > 0 && b.length < validJson.length),
         schemas
