@@ -45,3 +45,16 @@ object ReadinessEndpoint {
     )
   )
 }
+
+object TeapotEndpoint {
+  val endpoint = Endpoint(Method.GET / "teapot")
+    .out[Unit](Status.Custom(418, "I'm a teapot"))
+    .tag("system")
+
+  val routes: Routes[Any, Response] = Routes(
+    Method.GET / "teapot" -> handler(
+      ZIO.succeed(Response.status(Status.Custom(418, "I'm a teapot")))
+        @@ LogAspect.logSpan("get-teapot")
+    )
+  )
+}
