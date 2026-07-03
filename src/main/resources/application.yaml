@@ -20,7 +20,7 @@ dynamodb:
 observability:
   # Identifies the service in metric tags and log MDC. Also becomes the `stream_kind` tag
   # applied by arcane-framework's GlobalMetricTagProvider to every metric.
-  serviceName: "arcane-ingestion"
+  serviceName: "push-stream"
   # Static key/value tags added to every emitted metric (deployment, environment, region, ...).
   metricTags: {}
   datadog:
