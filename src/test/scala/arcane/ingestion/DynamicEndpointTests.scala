@@ -27,9 +27,9 @@ object DynamicEndpointTests extends ZIOSpecDefault {
 
   // Test double: metric emission is a no-op — we assert route behavior, not observability side-effects.
   private val noopMetrics: IngestionMetrics = new IngestionMetrics:
-    def recordRequest(producer: String, status: String): UIO[Unit]        = ZIO.unit
-    def recordIngestionBytes(producer: String, bytes: Long): UIO[Unit]    = ZIO.unit
-    def recordEndpointReload(activeEndpointCount: Int): UIO[Unit]         = ZIO.unit
+    def recordRequest(producer: String, status: String): UIO[Unit]     = ZIO.unit
+    def recordIngestionBytes(producer: String, bytes: Long): UIO[Unit] = ZIO.unit
+    def recordEndpointReload(activeEndpointCount: Int): UIO[Unit]      = ZIO.unit
 
   private def post(path: String, payload: String = "x"): Request =
     Request

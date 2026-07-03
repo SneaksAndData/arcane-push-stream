@@ -230,7 +230,8 @@ object RouteLoader:
                 s"schema=${schemaRef.subject}:v${schemaRef.version})"
             )
           yield
-            if isValid then Response.text(s"accepted for ${cfg.producerId}: ${payloadBytes.length} bytes").status(Status.Accepted)
+            if isValid then
+              Response.text(s"accepted for ${cfg.producerId}: ${payloadBytes.length} bytes").status(Status.Accepted)
             else Response.status(Status.InternalServerError)
 
         handled
