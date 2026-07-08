@@ -1,0 +1,4 @@
+[tools]
+java = "temurin-25.0.2"
+sbt = "1.10.11"
+just = "latest"

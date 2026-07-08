@@ -1,0 +1,52 @@
+name: Run tests with coverage
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+env:
+  PROJECT_NAME: Arcane.Push.Stream
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  validate_commit:
+    name: Validate commit
+    runs-on: ubuntu-latest
+    if: ${{ github.ref != 'refs/heads/main' }}
+    permissions:
+      id-token: write      # required for dependabot PRs
+      pull-requests: write # required for dependabot PRs
+      contents: read       # required for dependabot PRs
+      checks: write        # required for cobertura-action
+      packages: read       # required for building the SBT project
+
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup tools
+        uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+
+      - name: Build and test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: just coverage
+
+      - name: Validate formatting
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: just check
+
+      - uses: 5monkeys/cobertura-action@ee5787cc56634acddedc51f21c7947985531e6eb # v14
+        with:
+          path: ./target/scala-3.8.3/coverage-report/cobertura.xml
+          minimum_coverage: 0
+

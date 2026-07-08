@@ -13,6 +13,9 @@ clean:
 test:
     sbt test
 
+coverage:
+    sbt clean && sbt coverage && sbt test && sbt coverageReport
+
 run:
     sbt run 2>&1 | tspin
 
