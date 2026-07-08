@@ -89,5 +89,4 @@ object Main extends ZIOAppDefault {
         ObservabilityLayers.publisherLayer
       )
       .tapError(err => zlog(s"Fatal startup error: ${err.getMessage}"))
-      .exitCode
 }
