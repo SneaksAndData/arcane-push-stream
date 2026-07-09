@@ -78,9 +78,8 @@ object Main extends ZIOAppDefault {
         HealthService.live,
         ReadinessSignal.live,
         RequestServiceLive.live,
-        DynamoDBServiceLive.live,
+        PersistenceService.live,
         IcebergProvisioner.live,
-        ZLayer.fromFunction((c: AppConfig) => c.dynamodb),
         // Observability: tag provider is always installed (metrics register in-memory even when
         // no publisher is wired); the DataDog publisher is a conditional no-op controlled by
         // `observability.datadog.enabled`.

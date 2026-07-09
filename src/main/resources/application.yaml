@@ -9,13 +9,25 @@ router:
   # Routed-data API version, becomes part of the HTTP POST prefix: /api/<apiVersion>/<consumer>/data.
   apiVersion: "v2"
 
-dynamodb:
+# Persistence backend. Sealed ADT — exactly one variant is configured by setting `type`.
+#
+#  type: dynamoDB     → production; talks to AWS DynamoDB (or dynamodb-local via `endpoint`)
+#  type: inMemory     → dev / integration tests; buffers records in a per-producer ZIO Queue
+persistence:
+  type: "dynamoDB"
   region: "us-east-1"
   tableName: "arcane-ingestion-tokens"
   # Override endpoint for dynamodb-local / dev. Remove or comment out in production to use real AWS.
   endpoint: "http://localhost:8000"
   # Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).
   autoCreateTable: true
+
+# Example alternative — swap the block above for this to run without AWS:
+#
+# persistence:
+#   type: "inMemory"
+#   # Per-producer sliding queue capacity. Once full, the oldest record is evicted.
+#   queueCapacity: 10000
 
 observability:
   # Identifies the service in metric tags and log MDC. Also becomes the `stream_kind` tag

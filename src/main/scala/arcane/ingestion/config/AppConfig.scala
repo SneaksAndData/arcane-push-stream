@@ -2,7 +2,7 @@ package arcane.ingestion.config
 
 import zio.*
 import zio.config.*
-import zio.config.magnolia.deriveConfig
+import zio.config.magnolia.{deriveConfig, discriminator, name}
 import zio.config.yaml.YamlConfigProvider
 
 import arcane.ingestion.common.ApplicationError
@@ -21,12 +21,35 @@ final case class ServerConfig(
 
 final case class RouterConfig(apiVersion: String = "v1")
 
-final case class DynamoDBConfig(
-    region: String = "us-east-1",
-    tableName: String = "arcane-ingestion",
-    endpoint: Option[String] = None,
-    autoCreateTable: Boolean = false
-)
+/** Persistence backend configuration.
+  *
+  * Modelled as a sealed ADT so that DynamoDB and the in-memory provider are mutually exclusive by construction — the
+  * YAML must select exactly one, and unrelated knobs cannot leak between environments. The zio-config-magnolia
+  * `@discriminator("type")` annotation exposes the choice as a single YAML key (`type: dynamoDB` or `type: inMemory`),
+  * which is the idiomatic way to express tagged unions in zio-config.
+  */
+@discriminator("type")
+sealed trait PersistenceProvider
+
+object PersistenceProvider:
+
+  /** DynamoDB-backed persistence used in production. */
+  @name("dynamoDB")
+  final case class DynamoDB(
+      region: String = "us-east-1",
+      tableName: String = "arcane-ingestion",
+      endpoint: Option[String] = None,
+      autoCreateTable: Boolean = false
+  ) extends PersistenceProvider
+
+  /** In-memory persistence used for local dev and integration tests. Buffers records in a per-producer ZIO Queue.
+    *   - `queueCapacity`: per-producer sliding queue capacity. When full, the oldest record is evicted so memory stays
+    *     bounded even without a consumer.
+    */
+  @name("inMemory")
+  final case class InMemory(
+      queueCapacity: Int = 10000
+  ) extends PersistenceProvider
 
 /** DogStatsD-over-Unix-Domain-Socket publisher used by the arcane-framework `DataDog.UdsPublisher`.
   *
@@ -57,7 +80,7 @@ final case class ObservabilityConfig(
 final case class AppConfig(
     server: ServerConfig = ServerConfig(),
     router: RouterConfig = RouterConfig(),
-    dynamodb: DynamoDBConfig = DynamoDBConfig(),
+    persistence: PersistenceProvider = PersistenceProvider.DynamoDB(),
     observability: ObservabilityConfig = ObservabilityConfig()
 )
 

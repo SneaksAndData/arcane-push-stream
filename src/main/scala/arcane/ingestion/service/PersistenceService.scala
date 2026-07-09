@@ -1,6 +1,6 @@
 package arcane.ingestion.service
 
-import arcane.ingestion.config.DynamoDBConfig
+import arcane.ingestion.config.{AppConfig, PersistenceProvider}
 import arcane.ingestion.api.v1.SchemaRef
 import software.amazon.awssdk.auth.credentials.{
   AwsBasicCredentials,
@@ -26,6 +26,30 @@ import java.util.UUID
 
 trait PersistenceService:
   def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean]
+
+object PersistenceService:
+
+  /** Persistence provider selector.
+    *
+    * Materialises exactly one backend based on `AppConfig.persistence`, which is a sealed ADT so the choice is
+    * mutually exclusive by construction (no possibility of both backends being configured).
+    */
+  val live: ZLayer[AppConfig & ReadinessSignal, Throwable, PersistenceService] =
+    ZLayer.scoped[AppConfig & ReadinessSignal] {
+      for
+        cfg <- ZIO.service[AppConfig]
+        rs  <- ZIO.service[ReadinessSignal]
+        rsLayer = ZLayer.succeed(rs)
+        chosen: ZLayer[ReadinessSignal, Throwable, PersistenceService] = cfg.persistence match
+          case dynamo: PersistenceProvider.DynamoDB =>
+            ZLayer.succeed(dynamo) >>> DynamoDBServiceLive.live
+          case mem: PersistenceProvider.InMemory =>
+            ZLayer.succeed(mem) >>> InMemoryPersistenceServiceLive.live
+        svc <- (rsLayer >>> chosen).build.map(_.get[PersistenceService])
+      yield svc
+    }
+
+
 
 final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extends PersistenceService:
 
@@ -66,8 +90,8 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extend
 
 object DynamoDBServiceLive:
 
-  private val commonAwsConfigLayer: ZLayer[DynamoDBConfig, Nothing, CommonAwsConfig] =
-    ZLayer.fromFunction { (cfg: DynamoDBConfig) =>
+  private val commonAwsConfigLayer: ZLayer[PersistenceProvider.DynamoDB, Nothing, CommonAwsConfig] =
+    ZLayer.fromFunction { (cfg: PersistenceProvider.DynamoDB) =>
       CommonAwsConfig(
         region = Some(Region.of(cfg.region)),
         credentialsProvider =
@@ -119,9 +143,9 @@ object DynamoDBServiceLive:
       .mapError(_.toThrowable)
       .unit *> ZIO.logInfo(s"Created DynamoDB table: $tableName")
 
-  /** if the Table doesn't exist and 'autoCreateTable = true', create the tabe, otherwise throw IllegalStateException
+  /** if the Table doesn't exist and 'autoCreateTable = true', create the table, otherwise throw IllegalStateException
     */
-  private def ensureTable(dynamo: DynamoDb, cfg: DynamoDBConfig): IO[Throwable, Unit] =
+  private def ensureTable(dynamo: DynamoDb, cfg: PersistenceProvider.DynamoDB): IO[Throwable, Unit] =
     val check = tableExists(dynamo, cfg.tableName).flatMap {
       case true => ZIO.logInfo(s"DynamoDB table present: ${cfg.tableName}")
       case false if cfg.autoCreateTable =>
@@ -154,10 +178,10 @@ object DynamoDBServiceLive:
         case other => other
       }
 
-  private val serviceLayer: ZLayer[DynamoDb & DynamoDBConfig & ReadinessSignal, Throwable, PersistenceService] =
+  private val serviceLayer: ZLayer[DynamoDb & PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =
     ZLayer.fromZIO {
       for
-        cfg       <- ZIO.service[DynamoDBConfig]
+        cfg       <- ZIO.service[PersistenceProvider.DynamoDB]
         dynamo    <- ZIO.service[DynamoDb]
         readiness <- ZIO.service[ReadinessSignal]
         _ <- ZIO.logInfo(
@@ -169,8 +193,8 @@ object DynamoDBServiceLive:
       yield DynamoDBServiceLive(dynamo, cfg.tableName)
     }
 
-  val live: ZLayer[DynamoDBConfig & ReadinessSignal, Throwable, PersistenceService] =
-    ZLayer.makeSome[DynamoDBConfig & ReadinessSignal, PersistenceService](
+  val live: ZLayer[PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =
+    ZLayer.makeSome[PersistenceProvider.DynamoDB & ReadinessSignal, PersistenceService](
       NettyHttpClient.default,
       commonAwsConfigLayer,
       AwsConfig.configured(),
