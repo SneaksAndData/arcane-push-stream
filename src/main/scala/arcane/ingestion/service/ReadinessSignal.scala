@@ -2,8 +2,13 @@ package arcane.ingestion.service
 
 import zio.*
 
-/** Process-wide readiness flag. Flipped to `true` by subsystems whose successful initialisation is a precondition for
-  * the service accepting traffic (currently: DynamoDB connectivity).
+/** Process-wide readiness flag. Should be always ready after start-up.
+  *
+  * `true` after successful service initialisation, which is a pre-condition to accept traffic (currently: DynamoDB
+  * connectivity).
+  *
+  * Since DynamoDB is currently being bootstrapped, it is best to wait until that is done, before we start serving
+  * traffic. (To avoid HTTP 500 in case of starting a second pod.)
   */
 trait ReadinessSignal:
   def markReady: UIO[Unit]

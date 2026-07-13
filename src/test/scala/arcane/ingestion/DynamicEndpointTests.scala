@@ -25,6 +25,11 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         schemas.update(producer, schemaRef)
         true
 
+  private val failingRequestService: RequestService = new RequestService:
+    def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
+      ZIO.fail:
+        Throwable("Connection Error")
+
   // Test double: metric emission is a no-op — we assert route behavior, not observability side-effects.
   private val noopMetrics: IngestionMetrics = new IngestionMetrics:
     def recordRequest(producer: String, status: String): UIO[Unit]     = ZIO.unit
@@ -169,6 +174,33 @@ object DynamicEndpointTests extends ZIOSpecDefault {
           .get("avro-test")
           .exists(r => r.subject == "orders" && r.version == 3 && r.fingerprint.exists(_.nonEmpty)),
         badRes.status == Status.BadRequest
+      )
+    },
+    test("Returns 500 if DynamoDB not available") {
+      val avroSchema =
+        """{
+          |  "type": "record",
+          |  "name": "Order",
+          |  "namespace": "test",
+          |  "fields": [
+          |    { "name": "id",     "type": "string" },
+          |    { "name": "amount", "type": "int"    }
+          |  ]
+          |}""".stripMargin
+      val validJson = """{"id":"o-1","amount":42}"""
+      val cfg = EndpointConfig(
+        producerId = "avro-test",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = Some(avroSchema)
+      )
+      for
+        _      <- ZIO.succeed(queue.clear())
+        _      <- ZIO.succeed(schemas.clear())
+        routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), failingRequestService, noopMetrics)
+        res    <- routes.run(post("api/v1/avro-test/data", validJson))
+      yield assertTrue(
+        res.status == Status.InternalServerError
       )
     }
   )
