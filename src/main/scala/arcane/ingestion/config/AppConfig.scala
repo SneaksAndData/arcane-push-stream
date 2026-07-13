@@ -23,10 +23,8 @@ final case class RouterConfig(apiVersion: String = "v1")
 
 /** Persistence backend configuration.
   *
-  * Modelled as a sealed ADT so that DynamoDB and the in-memory provider are mutually exclusive by construction — the
-  * YAML must select exactly one, and unrelated knobs cannot leak between environments. The zio-config-magnolia
-  * `@discriminator("type")` annotation exposes the choice as a single YAML key (`type: dynamoDB` or `type: inMemory`),
-  * which is the idiomatic way to express tagged unions in zio-config.
+  * The providers are mutually exclusive. The zio-config-magnolia `@discriminator("type")` annotation exposes the choice
+  * as a single YAML key (`type: dynamoDB` or `type: inMemory`),
   */
 @discriminator("type")
 sealed trait PersistenceProvider

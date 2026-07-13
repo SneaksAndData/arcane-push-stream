@@ -9,7 +9,7 @@ router:
   # Routed-data API version, becomes part of the HTTP POST prefix: /api/<apiVersion>/<consumer>/data.
   apiVersion: "v2"
 
-# Persistence backend. Sealed ADT — exactly one variant is configured by setting `type`.
+# Persistence backend
 #
 #  type: dynamoDB     → production; talks to AWS DynamoDB (or dynamodb-local via `endpoint`)
 #  type: inMemory     → dev / integration tests; buffers records in a per-producer ZIO Queue
@@ -22,7 +22,7 @@ persistence:
   # Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).
   autoCreateTable: true
 
-# Example alternative — swap the block above for this to run without AWS:
+# Use in-memory queue (good for testing/local deployment)
 #
 # persistence:
 #   type: "inMemory"

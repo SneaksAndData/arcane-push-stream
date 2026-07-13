@@ -24,8 +24,8 @@ final class CompiledAvroSchema(val schema: Schema):
       .map("%02x".format(_))
       .mkString
 
-  /** Decode `jsonPayload` against this schema (this is the validation step) and re-encode the resulting record as Avro
-    * binary. Returns `Left(error)` if the JSON is malformed or does not conform to the schema.
+  /** Decode `jsonPayload` against schema (validation) and re-encode the resulting record as Avro binary. Returns
+    * `Left(error)` if the JSON is malformed or does not conform to the schema.
     *
     * Both reader and writer are instantiated per call to avoid sharing mutable state across concurrent requests.
     */

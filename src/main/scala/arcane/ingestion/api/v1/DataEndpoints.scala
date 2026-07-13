@@ -88,6 +88,8 @@ object RouteRegistry:
   def set(routes: Routes[Any, Response]): URIO[RouteRegistry, Unit] =
     ZIO.serviceWithZIO[RouteRegistry](_.set(routes))
 
+/** Data endpoint declaration, primarily used for OpenAPI doc generation.
+  */
 object DynamicServer:
 
   val endpoint =
@@ -244,9 +246,11 @@ object RouteLoader:
           @@ LogAspect.logSpan(cfg.producerId) @@ LogAspect.logAnnotateCorrelationId(req)
       }
 
-/*
+/* Service to watch kubernetes CRD resource and on change
+ * - mount the HTTP endpoint  using `RouteLoader`
+ * - procure tables based on provisioner configuration (e.g. `IcebergProvisioner`)
+ *
  * Wiring: watcher → loader → registry.set, all in a forked fiber.
- * The layer that should be injected in the Main app.
  */
 object DynamicRoutingApp:
   val reloader: ZIO[
@@ -277,7 +281,7 @@ object DynamicRoutingApp:
     } yield ()
 
   /** For each endpoint whose CRD declares an iceberg table, ensure the table exists via [[IcebergProvisioner]].
-    * Failures are logged and swallowed — we never let a single bad CR take down the route reloader fiber.
+    * Failures are logged and swallowed — to prevent bad CR take down the route reloader fiber.
     */
   private def provisionNewTables(
       provisioner: IcebergProvisioner,
