@@ -140,7 +140,7 @@ lazy val root = project
       // Removes duplicate files from META-INF
       // Mostly io.netty.versions.properties, license files, INDEX.LIST, MANIFEST.MF, etc.
       case ps if ps.startsWith("META-INF")         => MergeStrategy.discard
-      case ps if ps.endsWith("logback.xml")        => MergeStrategy.discard
+      case ps if ps.endsWith("logback.xml")        => MergeStrategy.first
       case ps if ps.endsWith("module-info.class")  => MergeStrategy.discard
       case ps if ps.endsWith("package-info.class") => MergeStrategy.discard
 

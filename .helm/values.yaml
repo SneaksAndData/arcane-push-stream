@@ -165,13 +165,35 @@ settings:
     # Routed-data API version prefix: POST /api/<apiVersion>/<consumerId>/data
     apiVersion: "v2"
 
-  dynamodb:
-    region: "us-east-1"
-    tableName: "arcane-ingestion-tokens"
-    # Optional endpoint override (e.g. dynamodb-local for tests). Leave empty to use real AWS.
-    endpoint: ""
-    # Whether to create the table on startup if missing. Recommended false in production.
-    autoCreateTable: false
+  # Persistence backend. Sealed ADT — `type` selects the variant, only that block is rendered.
+  #   type: dynamoDB → production; talks to AWS DynamoDB (or dynamodb-local via endpoint)
+  #   type: inMemory → dev/tests; buffers records in a per-producer ZIO Queue (no AWS)
+  persistence:
+    type: "dynamoDB"
+    dynamoDB:
+      region: "us-east-1"
+      tableName: "arcane-ingestion-tokens"
+      # Optional endpoint override (e.g. dynamodb-local for tests). Leave empty to use real AWS.
+      endpoint: ""
+      # Whether to create the table on startup if missing. Recommended false in production.
+      autoCreateTable: false
+    inMemory:
+      # Per-producer sliding queue capacity. Once full, the oldest record is evicted.
+      queueCapacity: 10000
+
+  # Observability: metric tagging and the optional DataDog DogStatsD publisher.
+  observability:
+    # Becomes the `stream_kind` metric tag and the log MDC service name.
+    serviceName: "push-stream"
+    # Static key/value tags added to every emitted metric.
+    metricTags: {}
+    datadog:
+      # Master switch for the DogStatsD UDS publisher. Enable when a DataDog agent socket is mounted.
+      enabled: false
+      # DogStatsD Unix-domain-socket path (must match the mounted agent socket).
+      socketPath: "/var/run/datadog/dsd.socket"
+      # Metric flush interval to the socket, in seconds.
+      publisherIntervalSeconds: 5
 
   # Health probe configuration (rendered into the Deployment's probes)
   probes:

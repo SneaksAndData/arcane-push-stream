@@ -1,0 +1,30 @@
+# DataDog metrics test overlay for a kind cluster.
+#
+# Usage (layered on top of values.yaml + values-dev.yaml):
+#   helm upgrade --install arcane-ingestion .helm \
+#     -f .helm/values.yaml -f .helm/values-dev.yaml -f .helm/values-datadog.yaml
+#
+# Prerequisite: a DataDog Agent DaemonSet must be running in the cluster and exposing the
+# DogStatsD Unix-domain socket on the node at /var/run/datadog/dsd.socket (see `just datadog-up`).
+# This overlay mounts that host socket into the app pod and turns on the UDS publisher.
+
+settings:
+  observability:
+    datadog:
+      enabled: true
+      socketPath: "/var/run/datadog/dsd.socket"
+      publisherIntervalSeconds: 5
+
+# Mount the node's DogStatsD socket directory into the container. The DaemonSet creates
+# /var/run/datadog/dsd.socket on the node; the app connects to it to emit metrics.
+extraVolumes:
+  - name: dsdsocket
+    hostPath:
+      path: /var/run/datadog
+      type: DirectoryOrCreate
+
+extraVolumeMounts:
+  - name: dsdsocket
+    mountPath: /var/run/datadog
+    # Not read-only: DogStatsD clients must be able to sendto() the datagram socket.
+    readOnly: false

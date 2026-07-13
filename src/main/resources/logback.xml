@@ -9,4 +9,12 @@
         <appender-ref ref="STDOUT" />
     </root>
 
+    <!-- Quiet noisy third-party libraries. These stay capped even when the root
+         logger is raised to DEBUG for application-level debugging. -->
+    <!-- AWS SDK v2 + its Netty client wire logging (hex dumps of DynamoDB traffic) -->
+    <logger name="software.amazon.awssdk" level="WARN" />
+    <logger name="io.netty" level="WARN" />
+    <!-- sttp/ZIO-http Kubernetes CRD watch request/response logging -->
+    <logger name="sttp.client3.logging" level="WARN" />
+
 </configuration>
