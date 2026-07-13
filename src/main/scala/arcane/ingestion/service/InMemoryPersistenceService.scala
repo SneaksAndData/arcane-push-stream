@@ -28,9 +28,9 @@ final case class PersistedRecord(
 /** In-memory [[PersistenceService]] that stores records in a ZIO `Queue` per producer.
   *
   * Intended as a drop-in replacement for the DynamoDB provider for local development, integration tests and demos —
-  * *not* for production use. Each producer gets its own bounded sliding queue (oldest entries are dropped once
-  * capacity is reached), which matches the DynamoDB partition-key isolation without unbounded memory growth when no
-  * consumer is attached.
+  * *not* for production use. Each producer gets its own bounded sliding queue (oldest entries are dropped once capacity
+  * is reached), which matches the DynamoDB partition-key isolation without unbounded memory growth when no consumer is
+  * attached.
   *
   * The queue is a ZIO-native primitive, so back-pressure and inspection integrate naturally with the rest of the
   * service without introducing any extra concurrency machinery.

@@ -31,8 +31,8 @@ object PersistenceService:
 
   /** Persistence provider selector.
     *
-    * Materialises exactly one backend based on `AppConfig.persistence`, which is a sealed ADT so the choice is
-    * mutually exclusive by construction (no possibility of both backends being configured).
+    * Materialises exactly one backend based on `AppConfig.persistence`, which is a sealed ADT so the choice is mutually
+    * exclusive by construction (no possibility of both backends being configured).
     */
   val live: ZLayer[AppConfig & ReadinessSignal, Throwable, PersistenceService] =
     ZLayer.scoped[AppConfig & ReadinessSignal] {
@@ -48,8 +48,6 @@ object PersistenceService:
         svc <- (rsLayer >>> chosen).build.map(_.get[PersistenceService])
       yield svc
     }
-
-
 
 final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extends PersistenceService:
 
@@ -178,7 +176,8 @@ object DynamoDBServiceLive:
         case other => other
       }
 
-  private val serviceLayer: ZLayer[DynamoDb & PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =
+  private val serviceLayer
+      : ZLayer[DynamoDb & PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =
     ZLayer.fromZIO {
       for
         cfg       <- ZIO.service[PersistenceProvider.DynamoDB]

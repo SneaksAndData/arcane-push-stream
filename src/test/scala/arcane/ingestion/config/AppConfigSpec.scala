@@ -23,8 +23,8 @@ object AppConfigSpec extends ZIOSpecDefault {
 
       // Env overrides apiVersion (wins over YAML) and sets tableName on the DynamoDB variant.
       val env = Map(
-        "ARCANE_INGESTION__ROUTER__API_VERSION"    -> "from-env-version",
-        "ARCANE_INGESTION__SERVER__PORT"           -> "9091",
+        "ARCANE_INGESTION__ROUTER__API_VERSION"     -> "from-env-version",
+        "ARCANE_INGESTION__SERVER__PORT"            -> "9091",
         "ARCANE_INGESTION__PERSISTENCE__TABLE_NAME" -> "from-env-table"
       )
 
