@@ -9,9 +9,9 @@ package arcane.ingestion.api.v1
 import zio.*
 import zio.stream.{SubscriptionRef, ZStream}
 
-import com.coralogix.zio.k8s.client.com.sneaksanddata.ingestion.v1alpha1.dataroutes
-import com.coralogix.zio.k8s.client.com.sneaksanddata.ingestion.v1alpha1.dataroutes.DataRoutes
-import com.coralogix.zio.k8s.client.com.sneaksanddata.ingestion.definitions.dataroute.v1alpha1.DataRoute
+import com.coralogix.zio.k8s.client.com.sneaksanddata.pushstream.v1alpha1.dataroutes
+import com.coralogix.zio.k8s.client.com.sneaksanddata.pushstream.v1alpha1.dataroutes.DataRoutes
+import com.coralogix.zio.k8s.client.com.sneaksanddata.pushstream.definitions.dataroute.v1alpha1.DataRoute
 import com.coralogix.zio.k8s.client.model.{Added, Deleted, K8sNamespace, Modified, Reseted, TypedWatchEvent}
 
 /** Kubernetes CRD-backed [[EndpointConfigSource]].

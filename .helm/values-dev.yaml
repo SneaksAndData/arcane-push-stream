@@ -1,6 +1,6 @@
 # Local development / kind e2e overrides.
 # Usage:
-#   helm install arcane-ingestion .helm -f .helm/values.yaml -f .helm/values-dev.yaml
+#   helm install arcane-push-stream .helm -f .helm/values.yaml -f .helm/values-dev.yaml
 #
 # The in-cluster `dynamodb-local` Service is deployed from deploy/k8s/dynamodb-local.yaml
 # by the `just up` / `just docker-up` / `just data-up` recipes.
@@ -22,7 +22,7 @@ settings:
     type: "dynamoDB"
     dynamoDB:
       region: "us-east-1"
-      tableName: "arcane_ingestion"
+      tableName: "arcane_push_stream"
       endpoint: "http://dynamodb-local.default.svc.cluster.local:8000"
       autoCreateTable: true
 
@@ -31,7 +31,7 @@ settings:
 # ZIO log annotations like `correlation-id` become structured fields DataDog can facet.
 extraEnv:
   - name: JAVA_TOOL_OPTIONS
-    value: "-Dlogback.configurationFile=/etc/arcane-ingestion/logback.json.xml"
+    value: "-Dlogback.configurationFile=/etc/arcane-push-stream/logback.json.xml"
   - name: AWS_ACCESS_KEY_ID
     value: "minioadmin"
   - name: AWS_SECRET_ACCESS_KEY

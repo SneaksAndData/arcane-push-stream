@@ -2,7 +2,7 @@ environment: "Production"
 
 image:
   # Repository to pull the image from
-  repository: "ghcr.io/sneaksanddata/arcane-ingestion"
+  repository: "ghcr.io/sneaksanddata/arcane-push-stream"
 
   # Tag to pull (defaults to the chart appVersion)
   tag: ""
@@ -62,8 +62,8 @@ crds:
 additionalLabels: {}
 # Example:
 #
-#  app.my-company.com/name: arcane-ingestion
-#  app.my-company.com/component: ingestion
+#  app.my-company.com/name: arcane-push-stream
+#  app.my-company.com/component: push-stream
 
 # Additional annotations for the deployment and pods
 additionalAnnotations: {}
@@ -80,7 +80,7 @@ extraEnvFrom: []
 # Example (AWS credentials sourced from a Secret):
 #
 #  - secretRef:
-#      name: arcane-ingestion-aws-credentials
+#      name: arcane-push-stream-aws-credentials
 
 # Extra volumes to add to the deployment
 extraVolumes: []
@@ -146,7 +146,7 @@ service:
   type: ClusterIP
   annotations: {}
 
-# Application settings. Rendered into a ConfigMap and mounted as /etc/arcane-ingestion/application.yaml.
+# Application settings. Rendered into a ConfigMap and mounted as /etc/arcane-push-stream/application.yaml.
 # The container is started with ARCANE_INGESTION_CONFIG pointing at that file.
 # Settings can be overridden by an environment variable. ARCANE_INGESTION__SERVER__PORT=9090 takes
 # precedence over settings.server.port below.
@@ -172,7 +172,7 @@ settings:
     type: "dynamoDB"
     dynamoDB:
       region: "us-east-1"
-      tableName: "arcane-ingestion-tokens"
+      tableName: "arcane-push-stream-tokens"
       # Optional endpoint override (e.g. dynamodb-local for tests). Leave empty to use real AWS.
       endpoint: ""
       # Whether to create the table on startup if missing. Recommended false in production.

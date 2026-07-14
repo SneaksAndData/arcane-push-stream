@@ -47,7 +47,7 @@ data:
         publisherIntervalSeconds: {{ .Values.settings.observability.datadog.publisherIntervalSeconds }}
 
   # Structured JSON logging config. Activated by pointing the JVM at this file via
-  # JAVA_TOOL_OPTIONS=-Dlogback.configurationFile=/etc/arcane-ingestion/logback.json.xml
+  # JAVA_TOOL_OPTIONS=-Dlogback.configurationFile=/etc/arcane-push-stream/logback.json.xml
   # (see .helm/values-dev.yaml). Emits one JSON object per line with the SLF4J MDC —
   # which carries ZIO log annotations such as `correlation-id` — as top-level fields, so
   # the DataDog log pipeline exposes them as facets (e.g. @correlation-id).

@@ -54,7 +54,7 @@ spec:
             - name: APPLICATION_VERSION
               value: "{{ (default (printf "v%s" .Chart.AppVersion) .Values.image.tag) }}"
             - name: ARCANE_INGESTION_CONFIG
-              value: /etc/arcane-ingestion/application.yaml
+              value: /etc/arcane-push-stream/application.yaml
             {{- if .Values.resourceNamespace }}
             - name: RESOURCE_NAMESPACE
               value: {{ .Values.resourceNamespace | quote }}
@@ -98,7 +98,7 @@ spec:
           {{- end }}
           volumeMounts:
             - name: config
-              mountPath: /etc/arcane-ingestion
+              mountPath: /etc/arcane-push-stream
               readOnly: true
             - name: tmp
               mountPath: /tmp

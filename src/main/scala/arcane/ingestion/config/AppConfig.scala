@@ -35,7 +35,7 @@ object PersistenceProvider:
   @name("dynamoDB")
   final case class DynamoDB(
       region: String = "us-east-1",
-      tableName: String = "arcane-ingestion",
+      tableName: String = "arcane-push-stream",
       endpoint: Option[String] = None,
       autoCreateTable: Boolean = false
   ) extends PersistenceProvider
@@ -70,7 +70,7 @@ final case class DatadogConfig(
   *   - `datadog`: DataDog UDS publisher configuration; see [[DatadogConfig]].
   */
 final case class ObservabilityConfig(
-    serviceName: String = "arcane-ingestion",
+    serviceName: String = "arcane-push-stream",
     metricTags: Map[String, String] = Map.empty,
     datadog: DatadogConfig = DatadogConfig()
 )

@@ -23,7 +23,7 @@ lazy val root = project
   .in(file("."))
   .enablePlugins(BuildInfoPlugin, K8sCustomResourceCodegenPlugin)
   .settings(
-    name             := "arcane-ingestion",
+    name             := "arcane-push-stream",
     organization     := "dev.zio",
     description      := "HTTP to ZIO streams web server",
     scalaVersion     := "3.8.3",

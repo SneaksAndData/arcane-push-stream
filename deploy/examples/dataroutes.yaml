@@ -1,4 +1,4 @@
-apiVersion: ingestion.sneaksanddata.com/v1alpha1
+apiVersion: pushstream.sneaksanddata.com/v1alpha1
 kind: DataRoute
 metadata:
   name: consumer1
@@ -7,7 +7,7 @@ spec:
   schemaSubject: consumer1-raw
   schemaVersion: 1
 ---
-apiVersion: ingestion.sneaksanddata.com/v1alpha1
+apiVersion: pushstream.sneaksanddata.com/v1alpha1
 kind: DataRoute
 metadata:
   name: consumer2
@@ -19,7 +19,7 @@ spec:
     {
       "type": "record",
       "name": "Consumer2Event",
-      "namespace": "com.sneaksanddata.ingestion",
+      "namespace": "com.sneaksanddata.pushstream",
       "fields": [
         { "name": "id",      "type": "string" },
         { "name": "payload", "type": { "type": "map", "values": "string" } }

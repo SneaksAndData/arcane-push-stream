@@ -14,7 +14,7 @@ OpenAPI / Swagger UI:
 
 Create a DataRoute (after the CRD is installed):
   cat <<EOF | kubectl -n {{ .Release.Namespace }} apply -f -
-  apiVersion: ingestion.sneaksanddata.com/v1alpha1
+  apiVersion: pushstream.sneaksanddata.com/v1alpha1
   kind: DataRoute
   metadata:
     name: example-consumer

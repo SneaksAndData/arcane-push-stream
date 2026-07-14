@@ -15,7 +15,7 @@ metadata:
   {{- end }}
 rules:
   - apiGroups:
-      - ingestion.sneaksanddata.com
+      - pushstream.sneaksanddata.com
     resources:
       - dataroutes
     verbs:

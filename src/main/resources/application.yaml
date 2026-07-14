@@ -16,7 +16,7 @@ router:
 persistence:
   type: "dynamoDB"
   region: "us-east-1"
-  tableName: "arcane-ingestion-tokens"
+  tableName: "arcane-push-stream-tokens"
   # Override endpoint for dynamodb-local / dev. Remove or comment out in production to use real AWS.
   endpoint: "http://localhost:8000"
   # Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).

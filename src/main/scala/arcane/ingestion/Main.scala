@@ -7,7 +7,7 @@ import arcane.ingestion.common.LogAspect
 import arcane.ingestion.config.AppConfig
 import arcane.ingestion.observability.{IngestionMetrics, ObservabilityLayers}
 import arcane.ingestion.service.*
-import com.coralogix.zio.k8s.client.com.sneaksanddata.ingestion.v1alpha1.dataroutes.DataRoutes
+import com.coralogix.zio.k8s.client.com.sneaksanddata.pushstream.v1alpha1.dataroutes.DataRoutes
 import com.coralogix.zio.k8s.client.config.*
 import com.coralogix.zio.k8s.client.config.httpclient.*
 import com.coralogix.zio.k8s.client.model.K8sNamespace
