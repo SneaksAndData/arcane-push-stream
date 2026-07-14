@@ -1,0 +1,50 @@
+# Local development / kind e2e overrides.
+# Usage:
+#   helm install arcane-push-stream .helm -f .helm/values.yaml -f .helm/values-dev.yaml
+#
+# The in-cluster `dynamodb-local` Service is deployed from deploy/k8s/dynamodb-local.yaml
+# by the `just up` / `just docker-up` / `just data-up` recipes.
+
+environment: "Development"
+
+image:
+  repository: "arcane-push-stream"
+  tag: "latest"
+  pullPolicy: "IfNotPresent"
+
+replicaCount: 1
+
+# Point DynamoDB at the in-cluster dynamodb-local and auto-create the table
+# on startup (dynamodb-local runs with -inMemory, so the table vanishes on pod
+# restart — the ingestion service must recreate it).
+settings:
+  persistence:
+    type: "dynamoDB"
+    dynamoDB:
+      region: "us-east-1"
+      tableName: "arcane_push_stream"
+      endpoint: "http://dynamodb-local.default.svc.cluster.local:8000"
+      autoCreateTable: true
+
+# dynamodb-local accepts any credentials; supply dummies via env for the AWS SDK.
+# JAVA_TOOL_OPTIONS activates the JSON logback config (bundled in the app ConfigMap) so
+# ZIO log annotations like `correlation-id` become structured fields DataDog can facet.
+extraEnv:
+  - name: JAVA_TOOL_OPTIONS
+    value: "-Dlogback.configurationFile=/etc/arcane-push-stream/logback.json.xml"
+  - name: AWS_ACCESS_KEY_ID
+    value: "minioadmin"
+  - name: AWS_SECRET_ACCESS_KEY
+    value: "minioadmin"
+  - name: AWS_REGION
+    value: "us-east-1"
+
+# Loosen resource defaults for laptops.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+

@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "app.configMapName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+  {{- with .Values.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+# Application configuration is rendered as YAML and mounted into the pod.
+# Environment variables prefixed with ARCANE_INGESTION_ override these values per-field
+# at runtime (see CONFIG_ENV_PREFIX to change the prefix).
+data:
+  application.yaml: |
+    server:
+      host: {{ .Values.settings.server.host | quote }}
+      port: {{ .Values.settings.server.port }}
+      nThreads: {{ .Values.settings.server.nThreads }}
+      maxContentLengthBytes: {{ .Values.settings.server.maxContentLengthBytes }}
+
+    router:
+      apiVersion: {{ .Values.settings.router.apiVersion | quote }}
+
+    # Persistence backend — sealed ADT selected by `type`. Only the matching variant's fields are rendered.
+    persistence:
+      type: {{ .Values.settings.persistence.type | quote }}
+      {{- if eq .Values.settings.persistence.type "dynamoDB" }}
+      region: {{ .Values.settings.persistence.dynamoDB.region | quote }}
+      tableName: {{ .Values.settings.persistence.dynamoDB.tableName | quote }}
+      {{- if .Values.settings.persistence.dynamoDB.endpoint }}
+      endpoint: {{ .Values.settings.persistence.dynamoDB.endpoint | quote }}
+      {{- end }}
+      autoCreateTable: {{ .Values.settings.persistence.dynamoDB.autoCreateTable }}
+      {{- else if eq .Values.settings.persistence.type "inMemory" }}
+      queueCapacity: {{ .Values.settings.persistence.inMemory.queueCapacity }}
+      {{- end }}
+
+    observability:
+      serviceName: {{ .Values.settings.observability.serviceName | quote }}
+      metricTags:
+        {{- toYaml .Values.settings.observability.metricTags | nindent 8 }}
+      datadog:
+        enabled: {{ .Values.settings.observability.datadog.enabled }}
+        socketPath: {{ .Values.settings.observability.datadog.socketPath | quote }}
+        publisherIntervalSeconds: {{ .Values.settings.observability.datadog.publisherIntervalSeconds }}
+
+  # Structured JSON logging config. Activated by pointing the JVM at this file via
+  # JAVA_TOOL_OPTIONS=-Dlogback.configurationFile=/etc/arcane-push-stream/logback.json.xml
+  # (see .helm/values-dev.yaml). Emits one JSON object per line with the SLF4J MDC —
+  # which carries ZIO log annotations such as `correlation-id` — as top-level fields, so
+  # the DataDog log pipeline exposes them as facets (e.g. @correlation-id).
+  logback.json.xml: |
+    <configuration>
+      <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+          <includeMdc>true</includeMdc>
+          <customFields>{"ddsource":"java","service":{{ .Values.settings.observability.serviceName | quote }}}</customFields>
+        </encoder>
+      </appender>
+
+      <root level="${LOG_LEVEL:-INFO}">
+        <appender-ref ref="JSON_STDOUT" />
+      </root>
+
+      <!-- Keep noisy third-party libraries quiet (AWS SDK/Netty wire dumps, sttp watch logs). -->
+      <logger name="software.amazon.awssdk" level="WARN" />
+      <logger name="io.netty" level="WARN" />
+      <logger name="sttp.client3.logging" level="WARN" />
+    </configuration>
+

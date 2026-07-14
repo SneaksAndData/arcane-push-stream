@@ -1,8 +1,0 @@
-[server]
-host = "0.0.0.0"
-port = 8085
-nThreads = 2
-
-[router]
-# Routed-data API version, becomes part of the HTTP POST prefix: /api/<apiVersion>/<consumer>/data.
-api_version = "v2"

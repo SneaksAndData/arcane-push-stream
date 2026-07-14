@@ -1,0 +1,25 @@
+{{- /*
+  This file is read by the sbt build (see `externalCustomResourceDefinitions`
+  in build.sbt) to generate the typed Kubernetes client.
+*/ -}}
+{{- if .Values.crds.install -}}
+{{- $crd := .Files.Get "files/dataroute.yaml" | fromYaml -}}
+{{- if not $crd -}}
+{{- fail "Could not read .helm/files/dataroute.yaml — chart is missing the canonical CRD source" -}}
+{{- end -}}
+apiVersion: {{ $crd.apiVersion }}
+kind: {{ $crd.kind }}
+metadata:
+  name: {{ $crd.metadata.name }}
+  labels:
+    {{- include "app.labels" $ | nindent 4 }}
+    {{- with .Values.crds.additionalLabels }}
+      {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.crds.additionalAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- toYaml $crd.spec | nindent 2 }}
+{{- end }}

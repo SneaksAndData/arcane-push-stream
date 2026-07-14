@@ -1,0 +1,23 @@
+{{ include "app.name" . }} {{ .Chart.AppVersion }} has been deployed to namespace {{ .Release.Namespace }}.
+
+Service:
+  kubectl -n {{ .Release.Namespace }} get svc {{ include "app.name" . }}
+
+Port-forward to test locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "app.name" . }} {{ .Values.settings.server.port }}:{{ .Values.settings.server.port }}
+
+Readiness:
+  curl -sf http://localhost:{{ .Values.settings.server.port }}/ready
+
+OpenAPI / Swagger UI:
+  open http://localhost:{{ .Values.settings.server.port }}/docs/openapi
+
+Create a DataRoute (after the CRD is installed):
+  cat <<EOF | kubectl -n {{ .Release.Namespace }} apply -f -
+  apiVersion: pushstream.sneaksanddata.com/v1alpha1
+  kind: DataRoute
+  metadata:
+    name: example-consumer
+  spec:
+    consumerId: example-consumer
+  EOF

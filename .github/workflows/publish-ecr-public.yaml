@@ -1,0 +1,91 @@
+name: Publish arcane-push-stream to ECR public registry
+run-name: Publish arcane-push-stream to public.ecr.aws by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: |
+          Version number to publish. Defaults to the latest git tag in the repository. 
+          This version MUST exist in the ghcr.io registry.
+        required: false
+        default: "current"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  publish_image:
+    name: Publish Docker Image to ECR Public
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+
+      - name: Get project version
+        uses: SneaksAndData/github-actions/generate_version@0d500930081146e263e39f654613b84cbb3695f1 # v0.1.9
+        id: current_version
+
+      - name: Set up variables
+        env:
+          VERSION: ${{ inputs.version }}
+          CURRENT_VERSION: ${{steps.current_version.outputs.version}}
+        run: |
+          test "$VERSION" == "current" && echo "IMAGE_VERSION=$CURRENT_VERSION" >> ${GITHUB_ENV} || echo "IMAGE_VERSION=$VERSION" >> ${GITHUB_ENV} 
+
+      - name: Import AWS Secrets
+        uses: hashicorp/vault-action@d1720f055e0635fd932a1d2a48f87a666a57906c # v3.0.0
+        with:
+          url: https://hashicorp-vault.awsp.sneaksanddata.com/
+          role: github
+          method: jwt
+          secrets: |
+            /secret/data/common/package-publishing/aws-ecr-public/production/container-user-public access_key | ACCESS_KEY ;
+            /secret/data/common/package-publishing/aws-ecr-public/production/container-user-public access_key_id | ACCESS_KEY_ID ;
+        id: aws_secrets
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@b47578312673ae6fa5b5096b330d9fbac3d116df # v4.2.1
+        with:
+          aws-access-key-id: ${{ env.ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Log in to the GitHub Container Registry
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Amazon ECR Public
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
+        with:
+          registry-type: public
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ env.IMAGE_VERSION }}
+          flavor:
+            latest=false
+
+      - name: Push image to ECR Public registry
+        uses: akhilerm/tag-push-action@f35ff2cb99d407368b5c727adbcc14a2ed81d509 # v2.2.0
+        with:
+          src: ${{ steps.meta.outputs.tags }}
+          dst: public.ecr.aws/s0t1h2z6/arcane/${{ github.event.repository.name }}:${{ steps.meta.outputs.version }}
