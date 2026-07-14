@@ -34,7 +34,7 @@ jobs:
 
 
       - name: Get project version
-        uses: SneaksAndData/github-actions/generate_version@0d500930081146e263e39f654613b84cbb3695f1 # v0.1.9
+        uses: SneaksAndData/github-actions/generate_version@6c8187f0d8c167a9410a76bed2e98409449ed495 # v0.1.11
         id: current_version
 
       - name: Set up variables
