@@ -78,8 +78,8 @@ jobs:
       - name: Build and Push Chart
         uses: SneaksAndData/github-actions/build_helm_chart@6c8187f0d8c167a9410a76bed2e98409449ed495 # v0.1.11
         with:
-          application: ${{ github.repository }}
+          application: ${{ github.event.repository.name }}
           app_version: ${{ steps.meta.outputs.version }}
           container_registry_user: ${{ github.actor }}
           container_registry_token: ${{ secrets.GITHUB_TOKEN }}
-          container_registry_address: ghcr.io/sneaksanddata/
+          container_registry_address: ghcr.io/sneaksanddata
