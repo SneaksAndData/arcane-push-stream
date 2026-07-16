@@ -5,7 +5,8 @@ WORKDIR /build
 
 COPY . .
 
-RUN --mount=type=secret,id=github_token GITHUB_TOKEN="$(cat /run/secrets/github_token)" sbt assembly
+RUN --mount=type=secret,id=github_token sh -euc 'test -s /run/secrets/github_token || { echo "Missing BuildKit secret github_token (pass --secret id=github_token,env=GITHUB_TOKEN)" >&2; exit 1; }
+GITHUB_TOKEN="$(cat /run/secrets/github_token)" sbt assembly'
 
 FROM gcr.io/distroless/java25-debian13
 

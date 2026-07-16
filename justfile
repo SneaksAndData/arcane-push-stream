@@ -23,7 +23,7 @@ check:
     sbt scalafmtCheckAll
 
 docker-build version="latest":
-    GITHUB_TOKEN=$(gh auth token) docker build --secret id=github_token,env=GITHUB_TOKEN -f .container/Dockerfile -t {{ IMAGE_NAME }}:{{ version }} .
+    DOCKER_BUILDKIT=1 GITHUB_TOKEN="$(gh auth token)" docker build --secret id=github_token,env=GITHUB_TOKEN -f .container/Dockerfile -t {{ IMAGE_NAME }}:{{ version }} .
 
 [doc("Run in kind: rebuild and load image, upgrade chart")]
 docker-up: docker-build
