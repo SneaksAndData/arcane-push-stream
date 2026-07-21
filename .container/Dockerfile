@@ -11,8 +11,8 @@ RUN sbt assembly
 
 FROM gcr.io/distroless/java25-debian13
 
-COPY --from=build /build/target/com.sneaksanddata.arcane.stream-json.assembly.jar /app/
+COPY --from=build /build/target/com.sneaksanddata.arcane.push-stream.assembly.jar /app/
 
 WORKDIR /app
 
-CMD ["-jar", "/app/com.sneaksanddata.arcane.stream-json.assembly.jar"]
+CMD ["--enable-native-access=ALL-UNNAMED", "-jar", "/app/com.sneaksanddata.arcane.push-stream.assembly.jar"]
