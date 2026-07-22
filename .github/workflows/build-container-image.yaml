@@ -31,6 +31,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set lowercase image name
+        id: image_name
+        run: echo "value=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+        env:
+          IMAGE_NAME: ${{ github.repository }}
+
       - name: Get project version
         uses: SneaksAndData/github-actions/generate_version@6c8187f0d8c167a9410a76bed2e98409449ed495 # v0.1.11
         id: version
@@ -58,22 +64,22 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
         with:
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:cache
-          cache-to: type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ref=ghcr.io/${{ github.repository }}:cache
+          cache-from: type=registry,ref=ghcr.io/${{ steps.image_name.outputs.value }}:cache
+          cache-to: type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ref=ghcr.io/${{ steps.image_name.outputs.value }}:cache
           context: .
           file: .container/Dockerfile
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/arm64,linux/amd64
-          secrets: |
-            github_token=${{ secrets.GITHUB_TOKEN }}
+          build-args: |
+            GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Chart
         uses: SneaksAndData/github-actions/build_helm_chart@6c8187f0d8c167a9410a76bed2e98409449ed495 # v0.1.11
         with:
-          application: arcane-stream-json
+          application: ${{ github.event.repository.name }}
           app_version: ${{ steps.meta.outputs.version }}
           container_registry_user: ${{ github.actor }}
           container_registry_token: ${{ secrets.GITHUB_TOKEN }}
-          container_registry_address: ghcr.io/sneaksanddata/
+          container_registry_address: ghcr.io/sneaksanddata
