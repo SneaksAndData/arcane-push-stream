@@ -53,10 +53,11 @@ object Main extends ZIOAppDefault {
           )
           _ <- DynamicRoutingApp.reloader
           _ <- Server.serve(
-            swaggerRoutes
+            (swaggerRoutes
               ++ HealthEndpoint.routes
               ++ ReadinessEndpoint.routes
-              ++ DynamicServer.routes
+              ++ DynamicServer.routes)
+              @@ Middleware.requestLogging()
           )
         } yield ())
       }
