@@ -129,7 +129,7 @@ lazy val root = project
     assembly / assemblyOutputPath := target.value / (assembly / assemblyJarName).value,
     // We do not use the version name here, because it's executable file name
     // and we want to keep it consistent with the name of the project
-    assembly / assemblyJarName := "com.sneaksanddata.arcane.stream-json.assembly.jar",
+    assembly / assemblyJarName := "com.sneaksanddata.arcane.push-stream.assembly.jar",
     assembly / assemblyMergeStrategy := {
       case "NOTICE"                                                                        => MergeStrategy.discard
       case "LICENSE"                                                                       => MergeStrategy.discard
