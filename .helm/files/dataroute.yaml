@@ -87,7 +87,7 @@ spec:
                       minLength: 1
                     namespace:
                       type: string
-                      description: Namespace under which the table is created (must already exist).
+                      description: Namespace under which the table is created (created on demand if missing).
                       minLength: 1
                     tableName:
                       type: string

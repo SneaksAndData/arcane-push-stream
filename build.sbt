@@ -62,7 +62,7 @@ lazy val root = project
       file(".helm/files/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
-      "com.coralogix"  %% "zio-k8s-client" % "3.1.2",
+      "com.coralogix"  %% "zio-k8s-client" % "3.2.1",
       "org.apache.avro" % "avro"           % "1.11.4",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
