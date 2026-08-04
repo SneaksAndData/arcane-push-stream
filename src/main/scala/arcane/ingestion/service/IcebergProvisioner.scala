@@ -148,13 +148,14 @@ object IcebergProvisionerLive:
   /** Build an Iceberg [[Schema]] from declared columns, assigning monotonic field-ids starting at 1 in declaration
     * order. This is the same scheme the framework's [[org.apache.iceberg.Schema]] uses when re-loading by column index,
     * so reordering columns of an existing table is forbidden — guard against that in a future schema-evolution pass.
+    *
+    * It is important to keep the schema fields NOT required, because framework expects all fields to be NULLABLE.
     */
   def buildSchema(spec: IcebergTableSpec): Schema =
     val nestedFields = spec.columns.zipWithIndex.map { case (col, idx) =>
       val id = idx + 1
       val t  = toIcebergType(col)
-      if col.required then Types.NestedField.required(id, col.name, t)
-      else Types.NestedField.optional(id, col.name, t)
+      Types.NestedField.optional(id, col.name, t)
     }
     new Schema(nestedFields.asJava)
 
