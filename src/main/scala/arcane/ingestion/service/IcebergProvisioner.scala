@@ -97,8 +97,8 @@ object IcebergProvisionerLive:
 
   /** Build in-memory [[IcebergCatalogSettings]] from a CRD spec.
     *
-    * For no-auth catalogs, set `ARCANE_FRAMEWORK__CATALOG_NO_AUTH` to skip auth properties.
-    * Otherwise OAuth2 properties are derived from `ARCANE_FRAMEWORK__S3_CATALOG_AUTH_*`.
+    * For no-auth catalogs, set `ARCANE_FRAMEWORK__CATALOG_NO_AUTH` to skip auth properties. Otherwise OAuth2 properties
+    * are derived from `ARCANE_FRAMEWORK__S3_CATALOG_AUTH_*`.
     */
   def buildSettings(spec: IcebergTableSpec): IcebergCatalogSettings = new IcebergCatalogSettings:
     override val namespace: String                         = spec.namespace

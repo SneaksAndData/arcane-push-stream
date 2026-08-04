@@ -214,8 +214,9 @@ object RouteLoader:
             _ <- ZIO
               .fail(NoContentError())
               .when(body.isEmpty)
-            // Avro path: validate by decoding JSON against the schema, then re-encode as binary.
-            // No schema configured: persist the raw JSON bytes unchanged.
+            // Avro path: the schema is only used to *validate* the payload (by decoding it against
+            // the schema); the raw JSON bytes are what gets persisted. Persisting Avro binary here
+            // would store unreadable data downstream, so both paths persist identical bytes.
             payloadBytes <- compiledSchema match
               case None =>
                 ZIO.succeed(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
@@ -223,6 +224,7 @@ object RouteLoader:
                 ZIO
                   .fromEither(schema.validateAndEncode(body))
                   .mapError(t => SchemaValidationError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName)))
+                  .as(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
             isValid <- ZIO
               .serviceWithZIO[RequestService](_.enqueueToken(payloadBytes, cfg.producerId, schemaRef))
               .mapError(classifyPersistenceError)
