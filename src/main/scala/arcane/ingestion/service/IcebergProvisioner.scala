@@ -6,10 +6,13 @@ import com.sneaksanddata.arcane.framework.models.ddl.CreateTableRequest
 import com.sneaksanddata.arcane.framework.models.settings.iceberg.IcebergCatalogSettings
 import com.sneaksanddata.arcane.framework.services.iceberg.{IcebergCatalogFactory, IcebergSinkEntityManager}
 
+import org.apache.iceberg.CatalogProperties
 import org.apache.iceberg.Schema
+import org.apache.iceberg.rest.auth.OAuth2Properties
 import org.apache.iceberg.types.{Type, Types}
 import zio.*
 
+import java.time.{Duration as JavaDuration}
 import scala.jdk.CollectionConverters.*
 
 /** Provisions Iceberg tables described by [[IcebergTableSpec]] values pulled from `DataRoute` CRDs.
@@ -21,7 +24,8 @@ import scala.jdk.CollectionConverters.*
   *     either evolve the table (if additive) or fail loudly / mint a new table for breaking changes;
   *   - the catalog REST endpoint is contacted lazily, on every call. There is no global, long-lived catalog instance to
   *     keep tests/start-up simple. Plain HTTP catalogs (lakekeeper with `CATALOG_NO_AUTH=1`) work out of the box;
-  *     OAuth-secured catalogs would need additionalProperties to be populated here in a follow-up.
+  *     OAuth-secured catalogs use `ARCANE_FRAMEWORK__S3_CATALOG_AUTH_*` env vars (unless
+  *     `ARCANE_FRAMEWORK__CATALOG_NO_AUTH` is present).
   */
 trait IcebergProvisioner:
   def provision(spec: IcebergTableSpec): Task[Unit]
@@ -81,17 +85,65 @@ final class IcebergProvisionerLive extends IcebergProvisioner:
       yield ()
 
 object IcebergProvisionerLive:
+  private val CatalogNoAuthEnv            = "ARCANE_FRAMEWORK__CATALOG_NO_AUTH"
+  private val AuthClientIdEnv             = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_CLIENT_ID"
+  private val AuthClientSecretEnv         = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_CLIENT_SECRET"
+  private val AuthClientUriEnv            = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_CLIENT_URI"
+  private val AuthScopeEnv                = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_SCOPE"
+  private val AuthStaticTokenEnv          = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_STATIC_TOKEN"
+  private val AuthTokenRefreshEnabledEnv  = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_TOKEN_REFRESH_ENABLED"
+  private val AuthSessionTimeoutMillisEnv = "ARCANE_FRAMEWORK__S3_CATALOG_AUTH_SESSION_TIMEOUT_MILLIS"
+  private val DefaultSessionTimeoutMillis = JavaDuration.ofMinutes(55).toMillis.toString
 
-  /** Build a minimal in-memory [[IcebergCatalogSettings]] from a CRD spec. `additionalProperties` is intentionally
-    * empty — the framework's `IcebergCatalogCredential` (which reads OAuth env vars at class-load time and throws if
-    * any are missing) is not referenced from this path, so noauth catalogs work without any further configuration.
+  /** Build in-memory [[IcebergCatalogSettings]] from a CRD spec.
+    *
+    * For no-auth catalogs, set `ARCANE_FRAMEWORK__CATALOG_NO_AUTH` to skip auth properties.
+    * Otherwise OAuth2 properties are derived from `ARCANE_FRAMEWORK__S3_CATALOG_AUTH_*`.
     */
   def buildSettings(spec: IcebergTableSpec): IcebergCatalogSettings = new IcebergCatalogSettings:
     override val namespace: String                         = spec.namespace
     override val warehouse: String                         = spec.warehouse
     override val catalogUri: String                        = spec.catalogUri
-    override val additionalProperties: Map[String, String] = Map.empty
+    override val additionalProperties: Map[String, String] = buildAdditionalPropertiesFromEnv(sys.env)
     override val maxCatalogInstanceLifetime: zio.Duration  = 1.hour
+
+  private[service] def buildAdditionalPropertiesFromEnv(env: Map[String, String]): Map[String, String] =
+    if isNoAuthEnabled(env) then Map.empty
+    else
+      val oauth2Uri   = requiredEnv(env, AuthClientUriEnv)
+      val oauth2Scope = requiredEnv(env, AuthScopeEnv)
+      val authBaseProperties =
+        env.get(AuthStaticTokenEnv).filter(_.nonEmpty) match
+          case Some(staticToken) =>
+            Map(
+              OAuth2Properties.TOKEN             -> staticToken,
+              OAuth2Properties.OAUTH2_SERVER_URI -> oauth2Uri,
+              OAuth2Properties.SCOPE             -> oauth2Scope
+            )
+          case None =>
+            val clientId     = requiredEnv(env, AuthClientIdEnv)
+            val clientSecret = requiredEnv(env, AuthClientSecretEnv)
+            Map(
+              OAuth2Properties.CREDENTIAL        -> s"$clientId:$clientSecret",
+              OAuth2Properties.OAUTH2_SERVER_URI -> oauth2Uri,
+              OAuth2Properties.SCOPE             -> oauth2Scope
+            )
+
+      authBaseProperties ++ Map(
+        OAuth2Properties.TOKEN_REFRESH_ENABLED -> env.getOrElse(AuthTokenRefreshEnabledEnv, "false").toLowerCase,
+        CatalogProperties.AUTH_SESSION_TIMEOUT_MS -> env.getOrElse(
+          AuthSessionTimeoutMillisEnv,
+          DefaultSessionTimeoutMillis
+        )
+      )
+
+  private def requiredEnv(env: Map[String, String], key: String): String =
+    env.get(key).filter(_.nonEmpty).getOrElse {
+      throw new IllegalArgumentException(s"Environment variable '$key' must be set for Iceberg catalog authentication")
+    }
+
+  private def isNoAuthEnabled(env: Map[String, String]): Boolean =
+    env.get(CatalogNoAuthEnv).exists(v => Set("1", "true", "yes", "on").contains(v.trim.toLowerCase))
 
   /** Build an Iceberg [[Schema]] from declared columns, assigning monotonic field-ids starting at 1 in declaration
     * order. This is the same scheme the framework's [[org.apache.iceberg.Schema]] uses when re-loading by column index,

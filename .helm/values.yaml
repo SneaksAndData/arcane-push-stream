@@ -77,10 +77,10 @@ extraEnv: []
 
 # Extra environment variables referencing a ConfigMap or Secret
 extraEnvFrom: []
-# Example (AWS credentials sourced from a Secret):
+# Example (catalog OAuth credentials sourced from a Secret created by ExternalSecret):
 #
 #  - secretRef:
-#      name: arcane-push-stream-aws-credentials
+#      name: arcane-push-stream-catalog-auth
 
 # Extra volumes to add to the deployment
 extraVolumes: []
