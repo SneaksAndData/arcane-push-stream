@@ -75,7 +75,7 @@ spec:
                     if the table already exists, the spec is left untouched. Schema-evolution
                     checks are intentionally deferred — this initial implementation only handles
                     the create-if-missing case.
-                  required: [catalogUri, warehouse, namespace, tableName, columns]
+                  required: [catalogUri, warehouse, namespace, tableName]
                   properties:
                     catalogUri:
                       type: string
@@ -98,8 +98,15 @@ spec:
                     columns:
                       type: array
                       description: |
-                        Ordered list of columns. Field-ids are assigned sequentially starting
-                        at 1 in declaration order; do not change ordering after creation.
+                        Ordered list of columns. Optional: when `payloadSchema` is set the columns
+                        are derived from it and this list is ignored, which keeps the table in step
+                        with the schema producers actually push. Supply it only for routes without
+                        a `payloadSchema`.
+                        Field-ids are assigned sequentially starting at 1 in declaration order;
+                        do not change ordering after creation.
+                        The `timestampUTC` and `arcane_merge_key` columns are appended automatically
+                        — the arcane-stream-pull plugin writes both, and its MERGE fails without the
+                        latter — so they never need to be declared here.
                       minItems: 1
                       items:
                         type: object

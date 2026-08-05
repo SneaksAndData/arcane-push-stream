@@ -34,7 +34,8 @@ final case class IcebergTableSpec(
     namespace: String,
     tableName: String,
     columns: Seq[IcebergColumnSpec],
-    initialProperties: Map[String, String] = Map.empty
+    initialProperties: Map[String, String] = Map.empty,
+    payloadSchema: Option[String] = None
 )
 
 final case class IcebergColumnSpec(
