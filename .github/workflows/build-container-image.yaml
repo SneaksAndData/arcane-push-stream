@@ -38,7 +38,7 @@ jobs:
           IMAGE_NAME: ${{ github.repository }}
 
       - name: Get project version
-        uses: SneaksAndData/github-actions/generate_version@6c8187f0d8c167a9410a76bed2e98409449ed495 # v0.1.11
+        uses: SneaksAndData/github-actions/generate_version@e3f4ea513c548adf4e774364872966d0d4a3d2fe # v0.1.12
         id: version
 
       - name: Extract metadata (tags, labels) for Docker
@@ -76,7 +76,7 @@ jobs:
             GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push Chart
-        uses: SneaksAndData/github-actions/build_helm_chart@6c8187f0d8c167a9410a76bed2e98409449ed495 # v0.1.11
+        uses: SneaksAndData/github-actions/build_helm_chart@e3f4ea513c548adf4e774364872966d0d4a3d2fe # v0.1.12
         with:
           application: ${{ github.event.repository.name }}
           app_version: ${{ steps.meta.outputs.version }}
