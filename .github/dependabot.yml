@@ -1,10 +1,35 @@
 version: 2
+
 updates:
+  # GitHub Actions used by the workflows in .github/workflows.
+  #
+  # All `uses:` references in this repository are pinned to full commit SHAs
+  # with a trailing `# vX.Y.Z` comment. Dependabot preserves that format: it
+  # bumps the SHA to the commit the new tag points at and rewrites the version
+  # comment, so updates never fall back to mutable tags. There is no
+  # dependabot.yml switch for this - the pinning style used in the workflow
+  # files is what Dependabot follows - and the zizmor audit workflow enforces
+  # that no unpinned reference is introduced.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      # Check for updates to GitHub Actions every week
       interval: "weekly"
       day: "monday"
+    open-pull-requests-limit: 10
     cooldown:
       default-days: 7
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github_actions"
+    groups:
+      github-actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      github-actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"

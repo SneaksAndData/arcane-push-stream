@@ -1,0 +1,54 @@
+# This workflow uses actions that are not certified by GitHub.
+# They are provided by a third-party and are governed by
+# separate terms of service, privacy policy, and support
+# documentation.
+name: Dependabot auto-merge
+
+# `pull_request_target` is required so that the workflow gets a writable
+# GITHUB_TOKEN: Dependabot-triggered `pull_request` runs only ever receive a
+# read-only token. Nothing from the pull request is checked out or executed
+# here, so the elevated context is not exposed to untrusted code.
+on: pull_request_target # zizmor: ignore[dangerous-triggers]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  dependabot:
+    name: Enable auto-merge
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      # GitHub Actions: all update types, gated by the required CI checks.
+      # Everything else: minor and patch updates only.
+      - name: Decide whether the update can be merged automatically
+        id: decide
+        env:
+          ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+        run: |
+          if [ "$ECOSYSTEM" = "github_actions" ] || [ "$UPDATE_TYPE" != "version-update:semver-major" ]; then
+            echo "automerge=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "automerge=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No approval step: GITHUB_TOKEN is not permitted to approve pull requests.
+      # If the target branch ever requires approving reviews, use a PAT or GitHub
+      # App token here instead of GITHUB_TOKEN.
+      - name: Enable auto-merge
+        if: steps.decide.outputs.automerge == 'true'
+        run: |
+          # Auto-merge can only be enabled while the PR is still pending checks.
+          # When there is nothing left to wait for, merge it directly.
+          gh pr merge --auto --squash "$PR_URL" || gh pr merge --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
