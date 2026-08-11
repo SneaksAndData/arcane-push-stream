@@ -29,8 +29,8 @@ object LogAspect {
           .flatMap(id => Random.nextUUID.map(uuid => id.getOrElse(uuid.toString)))
     }
 
-  /** Best-effort client IP: prefers proxy/ingress-set headers (requests reach the app behind the k8s ingress) and
-    * falls back to the socket's remote address.
+  /** Best-effort client IP: prefers proxy/ingress-set headers (requests reach the app behind the k8s ingress) and falls
+    * back to the socket's remote address.
     */
   def clientIp(req: Request): String =
     req.headers
