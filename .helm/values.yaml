@@ -58,6 +58,17 @@ crds:
   additionalLabels: {}
   additionalAnnotations: {}
 
+# DataDog Unified Service Tagging. Adds `tags.datadoghq.com/{env,service,version}` pod labels,
+# the matching DD_ENV/DD_SERVICE/DD_VERSION/DD_ENTITY_ID environment variables and the same
+# service/env/version tags on every emitted metric and log line.
+# Without these, the DataDog agent has no `service` tag for this workload and it never shows up
+# in the DataDog service list.
+datadog:
+  unifiedServiceTags:
+    enabled: true
+  # Service name reported to DataDog. Defaults to the chart name (arcane-push-stream).
+  serviceName: ""
+
 # Additional labels for the deployment and pods
 additionalLabels: {}
 # Example:

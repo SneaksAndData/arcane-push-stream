@@ -72,6 +72,33 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end }}
 
 {{/*
+Resolved application version, shared by APPLICATION_VERSION and the DataDog `version` tag.
+*/}}
+{{- define "app.version" -}}
+{{- default (printf "v%s" .Chart.AppVersion) .Values.image.tag }}
+{{- end }}
+
+{{/*
+DataDog service name used for Unified Service Tagging.
+*/}}
+{{- define "app.datadogService" -}}
+{{- default (include "app.name" .) .Values.datadog.serviceName }}
+{{- end }}
+
+{{/*
+DataDog Unified Service Tagging labels. The DataDog agent reads these from the pod and
+attaches env/service/version tags to every metric, log and trace originating from it.
+Without them the workload has no `service` tag and never appears in the DataDog service list.
+*/}}
+{{- define "app.datadogLabels" -}}
+{{- if .Values.datadog.unifiedServiceTags.enabled }}
+tags.datadoghq.com/env: {{ .Values.environment | quote }}
+tags.datadoghq.com/service: {{ include "app.datadogService" . | quote }}
+tags.datadoghq.com/version: {{ include "app.version" . | quote }}
+{{- end }}
+{{- end }}
+
+{{/*
 Generate the DataRoute viewer ClusterRole name
 */}}
 {{- define "app.clusterRole.dataRouteViewer" -}}
