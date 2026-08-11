@@ -1,6 +1,31 @@
 version: 2
 
 updates:
+  # Scala/sbt dependencies declared in build.sbt (zio, zio-http, arcane-framework, ...).
+  - package-ecosystem: "sbt"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "scala"
+    groups:
+      sbt:
+        applies-to: version-updates
+        patterns:
+          - "*"
+      sbt-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
   # GitHub Actions used by the workflows in .github/workflows.
   #
   # All `uses:` references in this repository are pinned to full commit SHAs
