@@ -93,14 +93,17 @@ object KubernetesEndpointConfigSourceLive:
     */
   private def toIcebergSpec(spec: DataRoute.Spec): Option[IcebergTableSpec] =
     spec.iceberg.toOption.flatMap { ice =>
-      val cols = ice.columns.toSeq.map { c =>
+      val cols = ice.columns.toOption.toSeq.flatten.map { c =>
         IcebergColumnSpec(
           name = c.name,
           `type` = c.`type`.value,
           required = c.required.toOption.getOrElse(false)
         )
       }
-      Option.when(cols.nonEmpty)(
+      val payloadSchema = spec.payloadSchema.toOption
+
+      // a route that declares a payload schema needs no hand-written column list: the provisioner derives one from it
+      Option.when(cols.nonEmpty || payloadSchema.nonEmpty)(
         IcebergTableSpec(
           catalogUri = ice.catalogUri,
           warehouse = ice.warehouse,
@@ -109,7 +112,8 @@ object KubernetesEndpointConfigSourceLive:
           columns = cols,
           initialProperties = ice.initialProperties.toOption
             .map(_.iterator.toMap)
-            .getOrElse(Map.empty)
+            .getOrElse(Map.empty),
+          payloadSchema = payloadSchema
         )
       )
     }

@@ -62,7 +62,7 @@ lazy val root = project
       file(".helm/files/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
-      "com.coralogix"  %% "zio-k8s-client" % "3.1.2",
+      "com.coralogix"  %% "zio-k8s-client" % "3.2.1",
       "org.apache.avro" % "avro"           % "1.11.4",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
@@ -84,7 +84,7 @@ lazy val root = project
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
       // identical to what the plugin will read/write.
-      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-91-g7a6b7d9",
+      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-108-g29646b9",
 
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
