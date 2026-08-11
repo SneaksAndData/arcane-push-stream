@@ -246,7 +246,9 @@ object RouteLoader:
               .recordRequest(cfg.producerId, "error")
               .as(appErrorToResponse(maxContentLengthBytes)(err))
           }
-          @@ LogAspect.logSpan(cfg.producerId) @@ LogAspect.logAnnotateCorrelationId(req)
+          @@ LogAspect.logSpan(cfg.producerId)
+          @@ LogAspect.logAnnotateCorrelationId(req)
+          @@ LogAspect.logAnnotateRequestContext(req)
       }
 
 /* Service to watch kubernetes CRD resource and on change
