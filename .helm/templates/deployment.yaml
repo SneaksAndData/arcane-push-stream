@@ -5,6 +5,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "app.labels" $ | nindent 4 }}
+    {{- include "app.datadogLabels" $ | nindent 4 }}
   {{- with .Values.additionalAnnotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -20,6 +21,7 @@ spec:
     metadata:
       labels:
         {{- include "app.labels" $ | nindent 8 }}
+        {{- include "app.datadogLabels" $ | nindent 8 }}
       annotations:
         # Trigger a rollout when the rendered application.yaml changes.
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
@@ -52,9 +54,30 @@ spec:
             - name: ENVIRONMENT
               value: {{ .Values.environment | quote }}
             - name: APPLICATION_VERSION
-              value: "{{ (default (printf "v%s" .Chart.AppVersion) .Values.image.tag) }}"
+              value: "{{ include "app.version" . }}"
             - name: ARCANE_INGESTION_CONFIG
               value: /etc/arcane-push-stream/application.yaml
+            {{- if .Values.datadog.unifiedServiceTags.enabled }}
+            # Mirror the Unified Service Tagging pod labels into the process environment so
+            # DogStatsD/log output is attributed to the same service in DataDog.
+            - name: DD_ENV
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['tags.datadoghq.com/env']
+            - name: DD_SERVICE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['tags.datadoghq.com/service']
+            - name: DD_VERSION
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['tags.datadoghq.com/version']
+            # Enables DogStatsD origin detection so the agent can resolve pod-level tags.
+            - name: DD_ENTITY_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
+            {{- end }}
             {{- if .Values.resourceNamespace }}
             - name: RESOURCE_NAMESPACE
               value: {{ .Values.resourceNamespace | quote }}

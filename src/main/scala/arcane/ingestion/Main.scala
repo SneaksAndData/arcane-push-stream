@@ -52,11 +52,12 @@ object Main extends ZIOAppDefault {
             s"Starting server on ${appConfig.server.host}:${appConfig.server.port} with ${appConfig.server.nThreads} threads"
           )
           _ <- DynamicRoutingApp.reloader
+          // keep health/readiness endpoints out of middleware to reduce requestLogging middleware noise.
+          // Everything else always gets a span (see LogAspect) plus a per-request access log line.
           _ <- Server.serve(
-            swaggerRoutes
-              ++ HealthEndpoint.routes
+            HealthEndpoint.routes
               ++ ReadinessEndpoint.routes
-              ++ DynamicServer.routes
+              ++ ((swaggerRoutes ++ DynamicServer.routes) @@ Middleware.requestLogging())
           )
         } yield ())
       }

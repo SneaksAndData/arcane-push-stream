@@ -62,29 +62,33 @@ lazy val root = project
       file(".helm/files/dataroute.yaml")
     ),
     libraryDependencies ++= Seq(
-      "com.coralogix"  %% "zio-k8s-client" % "3.1.2",
+      "com.coralogix"  %% "zio-k8s-client" % "3.2.1",
       "org.apache.avro" % "avro"           % "1.11.4",
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
       // whose SafeConstructor signature changed.
-      "org.yaml"                       % "snakeyaml"             % "1.33",
-      "com.softwaremill.sttp.client3" %% "slf4j-backend"         % "3.9.8",
-      "org.slf4j"                      % "slf4j-simple"          % "2.0.16",
-      "dev.zio"                       %% "zio"                   % zioVersion,
-      "dev.zio"                       %% "zio-config"            % "4.0.7",
-      "dev.zio"                       %% "zio-config-magnolia"   % "4.0.7",
-      "dev.zio"                       %% "zio-config-yaml"       % "4.0.7",
-      "dev.zio"                       %% "zio-http"              % zioHttpVersion,
-      "dev.zio"                       %% "zio-json"              % "0.9.2",
-      "dev.zio"                       %% "zio-schema"            % "1.8.5",
-      "dev.zio"                       %% "zio-schema-derivation" % "1.8.5",
-      "dev.zio"                       %% "zio-streams"           % zioVersion,
-      "dev.zio"                       %% "zio-dynamodb"          % "1.0.0-RC25",
+      "org.yaml"                       % "snakeyaml"     % "1.33",
+      "com.softwaremill.sttp.client3" %% "slf4j-backend" % "3.9.8",
+      // Logback is the SLF4J binding: `Main` routes ZIO logs through SLF4J, and the appenders in
+      // `src/main/resources/logback*.xml` are the app's only log sink. logstash-logback-encoder
+      // supplies the JSON encoder and the DataDog TCP appender used by logback.datadog.xml.
+      "ch.qos.logback"       % "logback-classic"          % "1.5.34",
+      "net.logstash.logback" % "logstash-logback-encoder" % "9.0",
+      "dev.zio"             %% "zio"                      % zioVersion,
+      "dev.zio"             %% "zio-config"               % "4.0.7",
+      "dev.zio"             %% "zio-config-magnolia"      % "4.0.7",
+      "dev.zio"             %% "zio-config-yaml"          % "4.0.7",
+      "dev.zio"             %% "zio-http"                 % zioHttpVersion,
+      "dev.zio"             %% "zio-json"                 % "0.9.2",
+      "dev.zio"             %% "zio-schema"               % "1.8.5",
+      "dev.zio"             %% "zio-schema-derivation"    % "1.8.5",
+      "dev.zio"             %% "zio-streams"              % zioVersion,
+      "dev.zio"             %% "zio-dynamodb"             % "1.0.0-RC25",
 
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
       // identical to what the plugin will read/write.
-      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-91-g7a6b7d9",
+      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-108-g29646b9",
 
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
@@ -129,7 +133,7 @@ lazy val root = project
     assembly / assemblyOutputPath := target.value / (assembly / assemblyJarName).value,
     // We do not use the version name here, because it's executable file name
     // and we want to keep it consistent with the name of the project
-    assembly / assemblyJarName := "com.sneaksanddata.arcane.stream-json.assembly.jar",
+    assembly / assemblyJarName := "com.sneaksanddata.arcane.push-stream.assembly.jar",
     assembly / assemblyMergeStrategy := {
       case "NOTICE"                                                                        => MergeStrategy.discard
       case "LICENSE"                                                                       => MergeStrategy.discard

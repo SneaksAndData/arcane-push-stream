@@ -141,7 +141,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         res    <- routes.run(req)
       yield assertTrue(res.status == Status.Accepted)
     },
-    test("Avro-bound route validates JSON, encodes to binary, and forwards SchemaRef") {
+    test("Avro-bound route validates JSON, persists the raw JSON, and forwards SchemaRef") {
       val avroSchema =
         """{
           |  "type": "record",
@@ -168,12 +168,65 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         badRes <- routes.run(post("api/v1/avro-test/data", invalidJson))
       yield assertTrue(
         okRes.status == Status.Accepted,
-        // Avro binary is smaller than the JSON it was decoded from.
-        queue.get("avro-test").exists(b => b.length > 0 && b.length < validJson.length),
+        // The schema is used for validation only — the persisted payload stays raw UTF-8 JSON.
+        queue.get("avro-test").map(new String(_, java.nio.charset.StandardCharsets.UTF_8)).contains(validJson),
         schemas
           .get("avro-test")
           .exists(r => r.subject == "orders" && r.version == 3 && r.fingerprint.exists(_.nonEmpty)),
         badRes.status == Status.BadRequest
+      )
+    },
+    test("persists identical bytes with and without a payload schema") {
+      val avroSchema =
+        """{
+          |  "type": "record",
+          |  "name": "Order",
+          |  "namespace": "test",
+          |  "fields": [
+          |    { "name": "id",     "type": "string" },
+          |    { "name": "amount", "type": "int"    }
+          |  ]
+          |}""".stripMargin
+      val payload = """{"id":"o-1","amount":42}"""
+      val schemaBound = EndpointConfig(
+        producerId = "parity-schema",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = Some(avroSchema)
+      )
+      val schemaless = EndpointConfig(
+        producerId = "parity-plain",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = None
+      )
+      for
+        _ <- ZIO.succeed(queue.clear())
+        _ <- ZIO.succeed(schemas.clear())
+        routes <- RouteLoader.build(
+          apiVersion,
+          maxContentLengthBytes,
+          List(schemaBound, schemaless),
+          fakeRequestService,
+          noopMetrics
+        )
+        withRes   <- routes.run(post(s"api/v1/${schemaBound.producerId}/data", payload))
+        plainRes  <- routes.run(post(s"api/v1/${schemaless.producerId}/data", payload))
+        withBody  <- withRes.body.asString
+        plainBody <- plainRes.body.asString
+        withBytes  = queue.get(schemaBound.producerId)
+        plainBytes = queue.get(schemaless.producerId)
+      yield assertTrue(
+        withRes.status == Status.Accepted,
+        plainRes.status == Status.Accepted,
+        // Sanity check: the schema really was compiled and bound, so the parity below is meaningful
+        // rather than a silent fallback to the "no validation" path.
+        schemas.get(schemaBound.producerId).exists(_.fingerprint.exists(_.nonEmpty)),
+        schemas.get(schemaless.producerId).exists(_.fingerprint.isEmpty),
+        withBytes.map(new String(_, java.nio.charset.StandardCharsets.UTF_8)).contains(payload),
+        plainBytes.map(new String(_, java.nio.charset.StandardCharsets.UTF_8)).contains(payload),
+        withBytes.zip(plainBytes).exists((a, b) => a.sameElements(b)),
+        withBody == plainBody.replace(schemaless.producerId, schemaBound.producerId)
       )
     },
     test("Returns 500 if DynamoDB not available") {
@@ -203,5 +256,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         res.status == Status.InternalServerError
       )
     }
-  )
+    // `queue`/`schemas` are shared mutable test doubles that individual tests clear before use,
+    // so the tests must not run concurrently.
+  ) @@ TestAspect.sequential
 }

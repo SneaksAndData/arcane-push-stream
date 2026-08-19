@@ -1,25 +1,41 @@
 <configuration>
     <appender name="JSON_TCP" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
-        <destination>tcp-intake.logs.datadoghq.eu:443</destination>
+        <destination>${ARCANE_DATADOG_ENDPOINT:-tcp-intake.logs.datadoghq.eu:443}</destination>
         <keepAliveDuration>20 seconds</keepAliveDuration>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdc>true</includeMdc>
             <customFields>
                 {
-                "service":"arcane-stream-runner",
+                "service":"arcane-push-stream",
                 "ddsource":"java",
+                "env":"${ENVIRONMENT:-unknown}",
+                "version":"${APPLICATION_VERSION:-unknown}",
                 "host":"${HOSTNAME}"
                 }
             </customFields>
             <prefix class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">
                 <layout class="ch.qos.logback.classic.PatternLayout">
-                    <pattern>${ARCANE__DATADOG_API_KEY} %mdc{keyThatDoesNotExist}</pattern>
+                    <pattern>${DD_API_KEY} %mdc{keyThatDoesNotExist}</pattern>
                 </layout>
             </prefix>
         </encoder>
         <ssl />
     </appender>
-    <root level="INFO">
+
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <layout>
+            <Pattern>%d [%thread] %-5level %logger{35} - %msg%n</Pattern>
+        </layout>
+    </appender>
+
+    <root level="${LOG_LEVEL:-INFO}">
         <appender-ref ref="JSON_TCP" />
+        <appender-ref ref="STDOUT" />
     </root>
+
+    <!-- Keep noisy third-party libraries quiet (AWS SDK/Netty wire dumps, sttp watch logs). -->
+    <logger name="software.amazon.awssdk" level="WARN" />
+    <logger name="io.netty" level="WARN" />
+    <logger name="sttp.client3.logging" level="WARN" />
 
 </configuration>

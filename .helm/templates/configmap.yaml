@@ -39,8 +39,17 @@ data:
 
     observability:
       serviceName: {{ .Values.settings.observability.serviceName | quote }}
-      metricTags:
-        {{- toYaml .Values.settings.observability.metricTags | nindent 8 }}
+      {{- /*
+        Unified Service Tagging is also applied at the source, so metrics are attributed to a
+        service even when the agent cannot resolve pod tags via origin detection.
+        User-supplied metricTags win over the defaults.
+      */}}
+      {{- $tags := dict }}
+      {{- if .Values.datadog.unifiedServiceTags.enabled }}
+      {{- $tags = dict "service" (include "app.datadogService" .) "env" .Values.environment "version" (include "app.version" .) }}
+      {{- end }}
+      {{- $tags = merge (deepCopy (default dict .Values.settings.observability.metricTags)) $tags }}
+      metricTags: {{ toYaml $tags | nindent 8 }}
       datadog:
         enabled: {{ .Values.settings.observability.datadog.enabled }}
         socketPath: {{ .Values.settings.observability.datadog.socketPath | quote }}
@@ -56,7 +65,7 @@ data:
       <appender name="JSON_STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
           <includeMdc>true</includeMdc>
-          <customFields>{"ddsource":"java","service":{{ .Values.settings.observability.serviceName | quote }}}</customFields>
+          <customFields>{"ddsource":"java","service":{{ include "app.datadogService" . | quote }},"env":{{ .Values.environment | quote }},"version":{{ include "app.version" . | quote }}}</customFields>
         </encoder>
       </appender>
 
