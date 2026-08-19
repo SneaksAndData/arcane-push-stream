@@ -67,19 +67,23 @@ lazy val root = project
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
       // whose SafeConstructor signature changed.
-      "org.yaml"                       % "snakeyaml"             % "1.33",
-      "com.softwaremill.sttp.client3" %% "slf4j-backend"         % "3.9.8",
-      "org.slf4j"                      % "slf4j-simple"          % "2.0.16",
-      "dev.zio"                       %% "zio"                   % zioVersion,
-      "dev.zio"                       %% "zio-config"            % "4.0.7",
-      "dev.zio"                       %% "zio-config-magnolia"   % "4.0.7",
-      "dev.zio"                       %% "zio-config-yaml"       % "4.0.7",
-      "dev.zio"                       %% "zio-http"              % zioHttpVersion,
-      "dev.zio"                       %% "zio-json"              % "0.9.2",
-      "dev.zio"                       %% "zio-schema"            % "1.8.5",
-      "dev.zio"                       %% "zio-schema-derivation" % "1.8.5",
-      "dev.zio"                       %% "zio-streams"           % zioVersion,
-      "dev.zio"                       %% "zio-dynamodb"          % "1.0.0-RC25",
+      "org.yaml"                       % "snakeyaml"     % "1.33",
+      "com.softwaremill.sttp.client3" %% "slf4j-backend" % "3.9.8",
+      // Logback is the SLF4J binding: `Main` routes ZIO logs through SLF4J, and the appenders in
+      // `src/main/resources/logback*.xml` are the app's only log sink. logstash-logback-encoder
+      // supplies the JSON encoder and the DataDog TCP appender used by logback.datadog.xml.
+      "ch.qos.logback"       % "logback-classic"          % "1.5.34",
+      "net.logstash.logback" % "logstash-logback-encoder" % "9.0",
+      "dev.zio"             %% "zio"                      % zioVersion,
+      "dev.zio"             %% "zio-config"               % "4.0.7",
+      "dev.zio"             %% "zio-config-magnolia"      % "4.0.7",
+      "dev.zio"             %% "zio-config-yaml"          % "4.0.7",
+      "dev.zio"             %% "zio-http"                 % zioHttpVersion,
+      "dev.zio"             %% "zio-json"                 % "0.9.2",
+      "dev.zio"             %% "zio-schema"               % "1.8.5",
+      "dev.zio"             %% "zio-schema-derivation"    % "1.8.5",
+      "dev.zio"             %% "zio-streams"              % zioVersion,
+      "dev.zio"             %% "zio-dynamodb"             % "1.0.0-RC25",
 
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
