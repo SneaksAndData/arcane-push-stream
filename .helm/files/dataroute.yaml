@@ -102,6 +102,10 @@ spec:
                         are derived from it and this list is ignored, which keeps the table in step
                         with the schema producers actually push. Supply it only for routes without
                         a `payloadSchema`.
+                        When derived, each root field of the payload record becomes one column:
+                        scalars keep their own type, while a nested `record`, `map` or `array`
+                        becomes a single `variant` column holding the document as sent, because
+                        its shape is not known until a message arrives.
                         Field-ids are assigned sequentially starting at 1 in declaration order;
                         do not change ordering after creation.
                         The `timestampUTC` and `arcane_merge_key` columns are appended automatically
@@ -120,8 +124,11 @@ spec:
                             description: |
                               Logical Iceberg type. Supported values:
                               string, int, long, double, float, boolean, binary, date,
-                              timestamp (UTC-adjusted).
-                            enum: [string, int, long, double, float, boolean, binary, date, timestamp]
+                              timestamp (UTC-adjusted), variant.
+                              A table declaring a `variant` column is created with
+                              `format-version: "3"`, since variant is not part of the v2 spec.
+                              Readers of that table must support Iceberg v3.
+                            enum: [string, int, long, double, float, boolean, binary, date, timestamp, variant]
                           required:
                             type: boolean
                             default: false

@@ -9,8 +9,8 @@ import zio.test.Assertion.*
 
 import scala.jdk.CollectionConverters.*
 
-/** Covers the table layout provisioned for a route, which has to match what arcane-stream-pull writes: the payload
-  * flattened into columns, plus the two envelope columns the framework supplies.
+/** Covers the table layout provisioned for a route, which has to match what arcane-stream-pull writes: one column per
+  * root payload field, nested containers as `variant`, plus the two envelope columns the framework supplies.
   */
 object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
 
@@ -77,33 +77,55 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
       .map(column => column.name() -> column.`type`().toString)
 
   def spec = suite("IcebergProvisionerLive.buildSchema")(
-    test("explodes a nested payload record into one typed column per member") {
+    test("stores a nested payload record in a single variant column") {
       val layout = layoutOf(specOf(Some(nestedRecordSchema)))
 
+      // the members are not hoisted into typed columns: their shape is only known once a message arrives, and
+      // variant keeps the document queryable without pinning the table to today's payload
       assertTrue(
         layout == Seq(
           "push_event_id" -> "string",
           "timestampUTC"  -> "string",
-          "eventType"     -> "string",
-          "sequence"      -> "int",
-          "durationMs"    -> "long",
-          "score"         -> "double",
-          "isRetry"       -> "boolean",
+          "payload"       -> "variant",
           // the payload declares no merge key, so the framework's canonical column is appended
           "arcane_merge_key" -> "string"
         )
       )
     },
-    test("keeps a map payload in a single string column, since its keys are unknown when the table is created") {
+    test("stores a map payload in a variant column, since its keys are unknown when the table is created") {
       val layout = layoutOf(specOf(Some(mapPayloadSchema)))
 
       assertTrue(
         layout == Seq(
           "push_event_id"    -> "string",
           "timestampUTC"     -> "string",
-          "payload"          -> "string",
+          "payload"          -> "variant",
           "arcane_merge_key" -> "string"
         )
+      )
+    },
+    test("stores an array payload in a variant column") {
+      val arraySchema =
+        """{"type":"record","name":"E","fields":[{"name":"lines","type":{"type":"array","items":"string"}}]}"""
+
+      assertTrue(layoutOf(specOf(Some(arraySchema))).contains("lines" -> "variant"))
+    },
+    test("pins a table holding a variant column to format version 3") {
+      // variant is a v3 type, and the property can only be set at creation, so it travels with the create request
+      assertTrue(
+        IcebergProvisionerLive.creationProperties(
+          IcebergProvisionerLive.resolveColumns(specOf(Some(nestedRecordSchema)))
+        ) == Map("format-version" -> "3")
+      )
+    },
+    test("leaves the format version alone for a table without a variant column") {
+      // an existing route must not be silently upgraded to v3 when its table is provisioned
+      assertTrue(
+        IcebergProvisionerLive
+          .creationProperties(
+            IcebergProvisionerLive.resolveColumns(specOf(None, columns = Seq(IcebergColumnSpec("id", "string"))))
+          )
+          .isEmpty
       )
     },
     test("adds both envelope columns to a route that declares columns by hand") {
@@ -138,7 +160,7 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
     test("assigns field ids in declaration order starting at 1") {
       val ids = IcebergProvisionerLive.buildSchema(specOf(Some(nestedRecordSchema))).columns().asScala.map(_.fieldId())
 
-      assertTrue(ids.toSeq == (1 to 8).toSeq)
+      assertTrue(ids.toSeq == (1 to 4).toSeq)
     },
     test("makes every column optional, as the framework requires") {
       val required = IcebergProvisionerLive
@@ -162,8 +184,26 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
 
       assertTrue(layoutOf(specOf(Some(schema))).contains("count" -> "int"))
     },
-    test("rejects a payload schema that flattens to colliding column names") {
+    test("rejects a payload schema whose columns differ only by case") {
       val colliding =
+        """
+          |{
+          |  "type": "record",
+          |  "name": "E",
+          |  "fields": [
+          |    { "name": "source", "type": "string" },
+          |    { "name": "Source", "type": "string" }
+          |  ]
+          |}
+          |""".stripMargin
+
+      // iceberg resolves columns case-insensitively, so one would shadow the other
+      assertZIO(ZIO.attempt(IcebergProvisionerLive.buildSchema(specOf(Some(colliding)))).exit)(
+        fails(isSubtype[IllegalArgumentException](hasMessage(containsString("source"))))
+      )
+    },
+    test("no longer treats a nested field as colliding with a root one") {
+      val nestedSameName =
         """
           |{
           |  "type": "record",
@@ -178,9 +218,10 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
           |}
           |""".stripMargin
 
-      // hoisting would silently drop one of them, so provisioning refuses the route instead
-      assertZIO(ZIO.attempt(IcebergProvisionerLive.buildSchema(specOf(Some(colliding)))).exit)(
-        fails(isSubtype[IllegalArgumentException](hasMessage(containsString("source"))))
+      // the nested member stays inside the variant document, so it cannot shadow the root column any more
+      assertTrue(
+        layoutOf(specOf(Some(nestedSameName))).contains("source"  -> "string"),
+        layoutOf(specOf(Some(nestedSameName))).contains("payload" -> "variant")
       )
     },
     test("rejects a payload schema that is not a record") {
