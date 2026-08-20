@@ -46,6 +46,8 @@ jobs:
 
       - uses: 5monkeys/cobertura-action@ee5787cc56634acddedc51f21c7947985531e6eb # v14
         with:
-          path: ./target/scala-3.8.3/coverage-report/cobertura.xml
+          # Glob the Scala binary-version directory rather than hardcoding it, so a
+          # scalaVersion bump in build.sbt does not silently break this step.
+          path: ./target/scala-*/coverage-report/cobertura.xml
           minimum_coverage: 0
 
