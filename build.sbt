@@ -83,7 +83,7 @@ lazy val root = project
       // 0.9.1, and zio-json follows early-semver, so 0.10.x is treated as binary
       // incompatible and fails the eviction check. Bump this only together with a
       // zio-schema release that targets zio-json 0.10.x.
-      "dev.zio"             %% "zio-json"                 % "0.9.2",
+      "dev.zio"             %% "zio-json"                 % "0.10.0",
       "dev.zio"             %% "zio-schema"               % "1.8.6",
       "dev.zio"             %% "zio-schema-derivation"    % "1.8.6",
       "dev.zio"             %% "zio-streams"              % zioVersion,
