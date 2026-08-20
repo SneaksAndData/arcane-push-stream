@@ -7,7 +7,7 @@ addSbtPlugin("com.eed3si9n"     % "sbt-buildinfo"        % "0.13.1")
 addSbtPlugin("com.github.sbt"   % "sbt-dynver"           % "5.1.1")
 addSbtPlugin("com.coralogix"    % "zio-k8s-crd"          % "3.2.1")
 
-// zio-k8s-crd 3.1.2 runs Twilio guardrail (com.twilio:guardrail_2.12:0.64.1) to generate the
+// zio-k8s-crd runs Twilio guardrail (com.twilio:guardrail_2.12:0.64.1) to generate the
 // custom-resource models. Guardrail was compiled against scalameta 4.4.15, which still ships
 // `scala.meta.classifiers.Aliases`. Newer scalameta (e.g. parsers 4.17.x, dragged onto the shared
 // sbt plugin classpath by other plugins) drops/relocates that class, leaving a mixed scalameta
@@ -20,14 +20,14 @@ addSbtPlugin("com.coralogix"    % "zio-k8s-crd"          % "3.2.1")
 // scalafmt formatting engine is pinned separately via `version` in .scalafmt.conf and is loaded
 // by sbt-scalafmt in an isolated classloader, so it is unaffected by this pin.)
 dependencyOverrides ++= Seq(
-  "org.scalameta" %% "scalameta"   % "4.17.3",
-  "org.scalameta" %% "parsers"     % "4.17.3",
-  "org.scalameta" %% "trees"       % "4.17.3",
-  "org.scalameta" %% "common"      % "4.17.3",
-  "org.scalameta" %% "dialects"    % "4.17.3",
-  "org.scalameta" %% "inputs"      % "4.17.3",
-  "org.scalameta" %% "tokens"      % "4.17.3",
-  "org.scalameta" %% "tokenizers"  % "4.17.3",
-  "org.scalameta" %% "quasiquotes" % "4.17.3",
-  "org.scalameta" %% "io"          % "4.17.3"
+  "org.scalameta" %% "scalameta"   % "4.4.15",
+  "org.scalameta" %% "parsers"     % "4.4.15",
+  "org.scalameta" %% "trees"       % "4.4.15",
+  "org.scalameta" %% "common"      % "4.4.15",
+  "org.scalameta" %% "dialects"    % "4.4.15",
+  "org.scalameta" %% "inputs"      % "4.4.15",
+  "org.scalameta" %% "tokens"      % "4.4.15",
+  "org.scalameta" %% "tokenizers"  % "4.4.15",
+  "org.scalameta" %% "quasiquotes" % "4.4.15",
+  "org.scalameta" %% "io"          % "4.4.15"
 )

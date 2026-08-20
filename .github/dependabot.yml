@@ -16,6 +16,36 @@ updates:
     labels:
       - "dependencies"
       - "scala"
+    ignore:
+      # Stay on sbt 1.x. sbt 2 changes the plugin artifact suffix (`_sbt2_3`
+      # instead of `_2.12_1.0`), and two plugins this build depends on have no
+      # sbt 2 release: `net.virtual-void:sbt-dependency-graph` (superseded by
+      # sbt's built-in `dependencyTree`) and `com.coralogix:zio-k8s-crd`, which
+      # generates the custom-resource models and has no sbt 2 build or
+      # replacement. Bumping `sbt.version` therefore breaks dependency
+      # resolution before anything compiles. Drop this rule once zio-k8s-crd
+      # publishes for sbt 2.
+      - dependency-name: "org.scala-sbt:sbt"
+        update-types:
+          - "version-update:semver-major"
+      # The scalameta modules in project/plugins.sbt are a deliberate pin to
+      # 4.4.15 (guardrail's expected version, see the comment there), not a
+      # version we want to track. Dependabot bumping them reintroduces the
+      # `NoClassDefFoundError: scala/meta/classifiers/Aliases` failure in the
+      # CRD codegen step. The trailing `*` matches the Scala binary-version
+      # suffix Dependabot appends (`scalameta_3`, `scalameta_2.12`, ...).
+      # sbt-scalafmt is deliberately not listed - it is a plugin, not part of
+      # the pin, and should keep receiving updates.
+      - dependency-name: "org.scalameta:scalameta*"
+      - dependency-name: "org.scalameta:parsers*"
+      - dependency-name: "org.scalameta:trees*"
+      - dependency-name: "org.scalameta:common*"
+      - dependency-name: "org.scalameta:dialects*"
+      - dependency-name: "org.scalameta:inputs*"
+      - dependency-name: "org.scalameta:tokens*"
+      - dependency-name: "org.scalameta:tokenizers*"
+      - dependency-name: "org.scalameta:quasiquotes*"
+      - dependency-name: "org.scalameta:io*"
     groups:
       sbt:
         applies-to: version-updates

@@ -79,7 +79,11 @@ lazy val root = project
       "dev.zio"             %% "zio-config-magnolia"      % "4.0.8",
       "dev.zio"             %% "zio-config-yaml"          % "4.0.8",
       "dev.zio"             %% "zio-http"                 % zioHttpVersion,
-      "dev.zio"             %% "zio-json"                 % "0.10.0",
+      // zio-json is kept on 0.9.x: zio-schema-json (pulled in transitively) depends on
+      // 0.9.1, and zio-json follows early-semver, so 0.10.x is treated as binary
+      // incompatible and fails the eviction check. Bump this only together with a
+      // zio-schema release that targets zio-json 0.10.x.
+      "dev.zio"             %% "zio-json"                 % "0.9.2",
       "dev.zio"             %% "zio-schema"               % "1.8.6",
       "dev.zio"             %% "zio-schema-derivation"    % "1.8.6",
       "dev.zio"             %% "zio-streams"              % zioVersion,
