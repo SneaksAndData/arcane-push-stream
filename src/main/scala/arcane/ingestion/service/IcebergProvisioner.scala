@@ -182,18 +182,37 @@ object IcebergProvisionerLive:
   val EpochWatermarkComment = """{"timestamp":"1970-01-01T00:00:00Z"}"""
 
   /** Properties seeded on the table right after creation: whatever the route declared, with the watermark comment
-    * filled in when it left one out. A comment the route does declare is honoured as-is, so a route that wants to start
-    * from a later point keeps control of it.
+    * filled in when it left one out, plus the route's pointer. A comment the route does declare is honoured as-is, so a
+    * route that wants to start from a later point keeps control of it.
     */
   private[service] def initialProperties(spec: IcebergTableSpec): Map[String, String] =
-    if spec.initialProperties.contains(CommentProperty) then spec.initialProperties
-    else spec.initialProperties + (CommentProperty -> EpochWatermarkComment)
+    val declared =
+      if spec.initialProperties.contains(CommentProperty) then spec.initialProperties
+      else spec.initialProperties + (CommentProperty -> EpochWatermarkComment)
 
-  /** Column receiving the payload's own `id`. It is renamed so it cannot be confused with the envelope `id`, which
-    * identifies the pushed message and lands in [[MergeKeyColumn]] instead.
+    spec.jsonExpressionPointer.filter(_.trim.nonEmpty) match
+      case Some(pointer) => declared + (JsonPointerProperty -> pointer)
+      case None          => declared
+
+  /** Table property carrying the route's `jsonExpressionPointer` to the consumer.
+    *
+    * arcane-stream-pull has to apply the same pointer this table's columns were derived from, and the PullStream CRD
+    * has no field to configure it with. Publishing it on the table itself keeps the two in step by construction: the
+    * table that defines the columns also states how to reach the document they describe.
+    *
+    * Like every entry in [[initialProperties]] it is written at creation time only, so changing a route's pointer on an
+    * existing table needs the property to be updated by hand.
+    */
+  val JsonPointerProperty = "json-pointer-expression"
+
+  /** Column receiving the payload's own `id`, used only by routes without a pointer. It is renamed so it cannot be
+    * confused with the envelope `id`, which identifies the pushed message and lands in [[MergeKeyColumn]] instead.
     *
     * The same rename is applied to the persisted document by [[renameReservedRootFields]], so the stored data and the
     * provisioned column always carry the same name.
+    *
+    * A pointer-bound route keeps the payload's own `id`: applying the pointer drops the envelope, so there is nothing
+    * left to collide with.
     */
   val PushEventIdColumn = "push_event_id"
 
@@ -250,8 +269,8 @@ object IcebergProvisionerLive:
     *
     * Which record that is depends on `pointer`: without one the payload schema's own root is used, so the request body
     * maps to the table field for field. With one, the record the pointer selects is used instead and *its* fields are
-    * hoisted into columns — the surrounding envelope contributes nothing. The ingestion endpoint applies the same
-    * pointer to every request body, so the record resolved here describes exactly the document that gets persisted.
+    * hoisted into columns — the surrounding envelope contributes nothing. The consumer applies the same pointer, read
+    * back from [[JsonPointerProperty]], so the record resolved here describes exactly the document it decodes.
     *
     * Scalar members keep their own typed column. A `record`, `map` or `array` member becomes a single `variant` column
     * instead: its shape is not known until a message arrives, so there is no set of typed columns to derive, and
@@ -266,10 +285,13 @@ object IcebergProvisionerLive:
       pointer: Option[String] = None
   ): Seq[IcebergColumnSpec] =
     val record = resolvePayloadRecord(payloadSchema, pointer)
+    // only a pointer-less route reaches its payload through the envelope, so only it can collide over `id`
+    val renamed = JsonPointer.segments(pointer).isEmpty
 
     val columns = record.getFields.asScala.toSeq.map { field =>
       val fieldSchema = unwrapNullable(field.schema())
-      IcebergColumnSpec(renameRootField(field.name()), toColumnType(fieldSchema, field.name()))
+      val name        = if renamed then renameRootField(field.name()) else field.name()
+      IcebergColumnSpec(name, toColumnType(fieldSchema, field.name()))
     }
 
     val duplicates = columns.groupBy(_.name.toLowerCase).filter(_._2.size > 1).keys

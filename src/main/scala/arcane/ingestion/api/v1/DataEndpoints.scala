@@ -233,14 +233,20 @@ object RouteLoader:
             // Validation runs against the whole body, since payloadSchema describes what the producer
             // sends; only afterwards is the pointer applied, so that the document reaching storage is
             // exactly the one the provisioned iceberg columns were derived from.
-            document <- ZIO
+            // The pointer is resolved by the consumer, not here: DynamoDB keeps the document exactly as the
+            // producer sent it, so a route whose pointer changes can be re-streamed from the existing items.
+            // It is still checked on the way in, since a body the pointer misses would only fail much later,
+            // in the stream, with no way back to the request that caused it.
+            _ <- ZIO
               .fromEither(JsonPointer.extract(body, cfg.jsonExpressionPointer))
               .mapError(_ => InvalidJsonPathError(cfg.jsonExpressionPointer.getOrElse("")))
-            // A route with a target table has its `id` provisioned as `push_event_id`; the document has to
-            // follow, because the consumer decodes it against that table and cannot rename anything itself.
-            // Routes without a table keep the producer's field names untouched.
-            payloadBytes = (if cfg.iceberg.isDefined then IcebergProvisionerLive.renameReservedRootFields(document)
-                            else document).getBytes(java.nio.charset.StandardCharsets.UTF_8)
+            // A pointer-less route with a target table has its `id` provisioned as `push_event_id`, and the
+            // consumer decodes the stored document against that table without renaming anything, so the
+            // document has to follow. A pointer-bound route needs no rename: the envelope is dropped when the
+            // pointer is applied, so the payload's own `id` no longer collides with the merge key.
+            payloadBytes = (if cfg.iceberg.isDefined && cfg.jsonExpressionPointer.isEmpty then
+                              IcebergProvisionerLive.renameReservedRootFields(body)
+                            else body).getBytes(java.nio.charset.StandardCharsets.UTF_8)
             isValid <- ZIO
               .serviceWithZIO[RequestService](_.enqueueToken(payloadBytes, cfg.producerId, schemaRef))
               .mapError(classifyPersistenceError)

@@ -236,7 +236,7 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         withBody == plainBody.replace(schemaless.producerId, schemaBound.producerId)
       )
     },
-    test("persists only the document the jsonExpressionPointer selects") {
+    test("persists the whole body and leaves extraction to the consumer") {
       val avroSchema =
         """{
           |  "type": "record",
@@ -265,15 +265,15 @@ object DynamicEndpointTests extends ZIOSpecDefault {
       for
         _      <- ZIO.succeed(queue.clear())
         routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), fakeRequestService, noopMetrics)
-        // the envelope is validated against the full schema, then dropped: the stored document has to line up
-        // with the hoisted iceberg columns, which are derived from the pointed-at record alone
+        // the consumer applies the pointer itself, reading it back from the target table, so keeping the body
+        // intact is what lets a route be re-streamed after its pointer changes
         res <- routes.run(post("api/v1/pointer-test/data", """{"id":"o-1","payload":{"amount":42}}"""))
       yield assertTrue(
         res.status == Status.Accepted,
         queue
           .get("pointer-test")
           .map(new String(_, java.nio.charset.StandardCharsets.UTF_8))
-          .contains("""{"amount":42}""")
+          .contains("""{"id":"o-1","payload":{"amount":42}}""")
       )
     },
     test("rejects a payload the jsonExpressionPointer does not resolve against") {

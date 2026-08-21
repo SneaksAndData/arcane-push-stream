@@ -55,17 +55,22 @@ spec:
                   type: string
                   description: |
                     Optional RFC 6901 JSON Pointer selecting the part of the request body that
-                    carries the data, e.g. `/payload`. The pointer is resolved at ingestion time
-                    and only the node it selects is persisted, so what lands in DynamoDB is
-                    already the document the target table describes.
-                    Its top-level fields are "hoisted" into one iceberg column each: scalars keep
-                    their own type, while a nested record, map or array becomes a single `variant`
-                    column. Without it the request body itself is persisted and its own top-level
-                    fields become the columns.
+                    carries the data, e.g. `/payload`.
+                    The request body is stored whole — the pointer is applied by the consumer, not
+                    at ingestion — so a route whose pointer changes can be re-streamed from the
+                    records already persisted. It is published on the target table as the
+                    `json-pointer-expression` property, which is where arcane-stream-pull reads it
+                    from, since the PullStream CRD has no field to configure it with.
+                    The pointed-at node's top-level fields are "hoisted" into one iceberg column
+                    each: scalars keep their own type, while a nested record, map or array becomes
+                    a single `variant` column. Without it the request body's own top-level fields
+                    become the columns, and a field named `id` is provisioned as `push_event_id`.
                     A request whose body does not contain the pointer is rejected with
                     400 "application error: invalid json path for payload".
                     Must start with `/`; the empty string means the document root and is
                     equivalent to omitting the field.
+                    Like all table properties it is written at creation time only: changing it on
+                    a route whose table already exists needs the property updated by hand.
                   pattern: '^(/[^/]*)*$'
                 schemaSubject:
                   type: string

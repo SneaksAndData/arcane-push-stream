@@ -7,8 +7,12 @@ import zio.json.DecoderOps
   *
   * At provisioning time [[IcebergProvisioner]] walks the pointer through the *Avro schema* to decide which record's
   * fields become table columns; at ingestion time [[extract]] walks the same pointer through each *request body* to
-  * decide what actually gets persisted. Both must agree on how a pointer is split and unescaped, so they share
-  * [[segments]] — otherwise a pointer like `/a~1b` could select one thing in the table layout and another in the data.
+  * check that the document the consumer will look for is actually there. Both must agree on how a pointer is split and
+  * unescaped, so they share [[segments]] — otherwise a pointer like `/a~1b` could select one thing in the table layout
+  * and another in the data.
+  *
+  * The body itself is persisted whole; the pointer is applied again by arcane-stream-pull, which reads it back from the
+  * table property the provisioner writes it to.
   */
 object JsonPointer:
 

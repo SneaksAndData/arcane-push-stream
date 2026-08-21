@@ -412,6 +412,52 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
         fails(isSubtype[IllegalArgumentException](hasMessage(containsString("RFC 6901"))))
       )
     },
+    test("publishes the route's pointer on the table so the consumer can read it back") {
+      assertTrue(
+        IcebergProvisionerLive.initialProperties(
+          specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("/payload"))
+        ) == Map(
+          "comment"                 -> """{"timestamp":"1970-01-01T00:00:00Z"}""",
+          "json-pointer-expression" -> "/payload"
+        )
+      )
+    },
+    test("publishes no pointer property for a route without one") {
+      assertTrue(
+        !IcebergProvisionerLive.initialProperties(specOf(Some(nestedRecordSchema))).contains("json-pointer-expression"),
+        !IcebergProvisionerLive
+          .initialProperties(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("")))
+          .contains("json-pointer-expression")
+      )
+    },
+    test("keeps a pointed-at record's own id, since the envelope it could collide with is dropped") {
+      val schema =
+        """
+          |{
+          |  "type": "record",
+          |  "name": "Producer6Event",
+          |  "namespace": "com.sneaksanddata.pushstream",
+          |  "fields": [
+          |    { "name": "id", "type": "string" },
+          |    {
+          |      "name": "payload",
+          |      "type": {
+          |        "type": "record",
+          |        "name": "Producer6Payload",
+          |        "namespace": "com.sneaksanddata.pushstream",
+          |        "fields": [ { "name": "id", "type": "string" } ]
+          |      }
+          |    }
+          |  ]
+          |}
+          |""".stripMargin
+
+      assertTrue(
+        layoutOf(specOf(Some(schema), jsonExpressionPointer = Some("/payload"))).contains("id" -> "string"),
+        // a pointer-less route still reaches its payload through the envelope, so the rename stays
+        layoutOf(specOf(Some(schema))).contains("push_event_id" -> "string")
+      )
+    },
     test("renames a document's root id to match the provisioned column") {
       // the consumer decodes the stored document against the table, and the PullStream CRD exposes no rename map,
       // so the document has to arrive already carrying the column name
