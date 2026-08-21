@@ -12,6 +12,8 @@ import org.apache.iceberg.Schema
 import org.apache.iceberg.rest.auth.OAuth2Properties
 import org.apache.iceberg.types.{Type, Types}
 import zio.*
+import zio.json.ast.Json
+import zio.json.DecoderOps
 
 import java.time.{Duration as JavaDuration}
 import scala.jdk.CollectionConverters.*
@@ -65,29 +67,28 @@ final class IcebergProvisionerLive extends IcebergProvisioner:
   }
 
   /** Seed table-level properties (e.g. the stream-pull watermark COMMENT) that the CRD declared under
-    * `initialProperties`. Only applied on initial creation to keep the operation a one-shot bootstrap; if the table
-    * already existed we leave properties untouched.
+    * `initialProperties`, plus the watermark comment default from [[initialProperties]]. Only applied on initial
+    * creation to keep the operation a one-shot bootstrap; if the table already existed we leave properties untouched.
     */
   private def applyInitialProperties(
       factory: IcebergCatalogFactory,
       settings: IcebergCatalogSettings,
       spec: IcebergTableSpec
   ): Task[Unit] =
-    if spec.initialProperties.isEmpty then ZIO.unit
-    else
-      for
-        catalog <- factory.getCatalog
-        tableId = org.apache.iceberg.catalog.TableIdentifier.of(settings.namespace, spec.tableName)
-        table <- ZIO.attemptBlocking(catalog.loadTable(factory.getSessionContext, tableId))
-        _ <- ZIO.attemptBlocking {
-          val update = table.updateProperties()
-          spec.initialProperties.foreach { case (k, v) => update.set(k, v) }
-          update.commit()
-        }
-        _ <- ZIO.logInfo(
-          s"[IcebergProvisioner] seeded ${spec.initialProperties.size} initial properties on ${spec.namespace}.${spec.tableName}"
-        )
-      yield ()
+    val properties = initialProperties(spec)
+    for
+      catalog <- factory.getCatalog
+      tableId = org.apache.iceberg.catalog.TableIdentifier.of(settings.namespace, spec.tableName)
+      table <- ZIO.attemptBlocking(catalog.loadTable(factory.getSessionContext, tableId))
+      _ <- ZIO.attemptBlocking {
+        val update = table.updateProperties()
+        properties.foreach { case (k, v) => update.set(k, v) }
+        update.commit()
+      }
+      _ <- ZIO.logInfo(
+        s"[IcebergProvisioner] seeded ${properties.size} initial properties on ${spec.namespace}.${spec.tableName}"
+      )
+    yield ()
 
 object IcebergProvisionerLive:
   private val CatalogNoAuthEnv            = "ARCANE_FRAMEWORK__CATALOG_NO_AUTH"
@@ -168,10 +169,50 @@ object IcebergProvisionerLive:
     if columns.exists(_.`type`.equalsIgnoreCase("variant")) then Map(FormatVersionProperty -> VariantFormatVersion)
     else Map.empty
 
-  /** Column receiving the payload's own `id`. It is renamed so it cannot be confused with the envelope `id`, which
-    * identifies the pushed message and lands in [[MergeKeyColumn]] instead.
+  /** Table property holding the arcane-stream-pull watermark. */
+  val CommentProperty = "comment"
+
+  /** Watermark seeded as the table COMMENT when the route declares none.
     *
-    * Must agree with the rename map configured on the consuming arcane-stream-pull instance.
+    * arcane-stream-pull parses the *entire* comment as its watermark JSON, and dies with "Invalid watermark value" when
+    * it is absent or not JSON, so a table provisioned without one cannot be consumed until an operator issues a COMMENT
+    * ON by hand. The epoch makes the consumer replay from the beginning, which is the right starting point for a table
+    * that has never been read. Note the value carries no `watermark:` prefix — the comment is the JSON.
+    */
+  val EpochWatermarkComment = """{"timestamp":"1970-01-01T00:00:00Z"}"""
+
+  /** Properties seeded on the table right after creation: whatever the route declared, with the watermark comment
+    * filled in when it left one out, plus the route's pointer. A comment the route does declare is honoured as-is, so a
+    * route that wants to start from a later point keeps control of it.
+    */
+  private[service] def initialProperties(spec: IcebergTableSpec): Map[String, String] =
+    val declared =
+      if spec.initialProperties.contains(CommentProperty) then spec.initialProperties
+      else spec.initialProperties + (CommentProperty -> EpochWatermarkComment)
+
+    spec.jsonExpressionPointer.filter(_.trim.nonEmpty) match
+      case Some(pointer) => declared + (JsonPointerProperty -> pointer)
+      case None          => declared
+
+  /** Table property carrying the route's `jsonExpressionPointer` to the consumer.
+    *
+    * arcane-stream-pull has to apply the same pointer this table's columns were derived from, and the PullStream CRD
+    * has no field to configure it with. Publishing it on the table itself keeps the two in step by construction: the
+    * table that defines the columns also states how to reach the document they describe.
+    *
+    * Like every entry in [[initialProperties]] it is written at creation time only, so changing a route's pointer on an
+    * existing table needs the property to be updated by hand.
+    */
+  val JsonPointerProperty = "json-pointer-expression"
+
+  /** Column receiving the payload's own `id`, used only by routes without a pointer. It is renamed so it cannot be
+    * confused with the envelope `id`, which identifies the pushed message and lands in [[MergeKeyColumn]] instead.
+    *
+    * The same rename is applied to the persisted document by [[renameReservedRootFields]], so the stored data and the
+    * provisioned column always carry the same name.
+    *
+    * A pointer-bound route keeps the payload's own `id`: applying the pointer drops the envelope, so there is nothing
+    * left to collide with.
     */
   val PushEventIdColumn = "push_event_id"
 
@@ -201,7 +242,9 @@ object IcebergProvisionerLive:
     * hand-written list otherwise, with the envelope columns appended.
     */
   private[service] def resolveColumns(spec: IcebergTableSpec): Seq[IcebergColumnSpec] =
-    withEnvelopeColumns(spec.payloadSchema.map(deriveColumns).getOrElse(spec.columns))
+    withEnvelopeColumns(
+      spec.payloadSchema.map(deriveColumns(_, spec.jsonExpressionPointer)).getOrElse(spec.columns)
+    )
 
   def buildSchema(spec: IcebergTableSpec): Schema =
     val nestedFields = resolveColumns(spec).zipWithIndex.map { case (col, idx) =>
@@ -222,26 +265,33 @@ object IcebergProvisionerLive:
 
     columns ++ envelope
 
-  /** Maps an Avro record schema onto the target table's columns, one column per root field.
+  /** Maps an Avro record schema onto the target table's columns, one column per field.
+    *
+    * Which record that is depends on `pointer`: without one the payload schema's own root is used, so the request body
+    * maps to the table field for field. With one, the record the pointer selects is used instead and *its* fields are
+    * hoisted into columns — the surrounding envelope contributes nothing. The consumer applies the same pointer, read
+    * back from [[JsonPointerProperty]], so the record resolved here describes exactly the document it decodes.
     *
     * Scalar members keep their own typed column. A `record`, `map` or `array` member becomes a single `variant` column
     * instead: its shape is not known until a message arrives, so there is no set of typed columns to derive, and
     * Iceberg's variant encoding preserves the document as the producer sent it while staying queryable. This matches
-    * the framework's own mapping, where those Avro types become `ObjectType` and therefore `VariantType`.
+    * the framework's own mapping, where those Avro types become `ObjectType` and therefore `VariantType`. Hoisting
+    * therefore only ever descends one level: whatever sits below the pointed-at record stays inside a variant.
     *
     * A table holding a variant column must be created with `format-version=3`; see [[FormatVersionProperty]].
     */
-  private[service] def deriveColumns(payloadSchema: String): Seq[IcebergColumnSpec] =
-    val parsed = org.apache.avro.Schema.Parser().parse(payloadSchema)
+  private[service] def deriveColumns(
+      payloadSchema: String,
+      pointer: Option[String] = None
+  ): Seq[IcebergColumnSpec] =
+    val record = resolvePayloadRecord(payloadSchema, pointer)
+    // only a pointer-less route reaches its payload through the envelope, so only it can collide over `id`
+    val renamed = JsonPointer.segments(pointer).isEmpty
 
-    if parsed.getType != org.apache.avro.Schema.Type.RECORD then
-      throw new IllegalArgumentException(
-        s"payloadSchema must be an Avro record to derive iceberg columns from, got '${parsed.getType.getName}'"
-      )
-
-    val columns = parsed.getFields.asScala.toSeq.map { field =>
+    val columns = record.getFields.asScala.toSeq.map { field =>
       val fieldSchema = unwrapNullable(field.schema())
-      IcebergColumnSpec(renameRootField(field.name()), toColumnType(fieldSchema, field.name()))
+      val name        = if renamed then renameRootField(field.name()) else field.name()
+      IcebergColumnSpec(name, toColumnType(fieldSchema, field.name()))
     }
 
     val duplicates = columns.groupBy(_.name.toLowerCase).filter(_._2.size > 1).keys
@@ -253,9 +303,53 @@ object IcebergProvisionerLive:
 
     columns
 
+  /** Walks `pointer` through the payload schema and returns the record whose fields become the table's columns.
+    *
+    * Traversal only crosses record members. A pointer reaching into a map or an array cannot name a stable set of
+    * fields — a map's keys are unknown until a message arrives, and an array index would pick one element out of many —
+    * so those are rejected here rather than producing a table that silently fails to match the data.
+    */
+  private[service] def resolvePayloadRecord(
+      payloadSchema: String,
+      pointer: Option[String]
+  ): org.apache.avro.Schema =
+    val root = requireRecord(org.apache.avro.Schema.Parser().parse(payloadSchema), "payloadSchema")
+
+    JsonPointer.segments(pointer).foldLeft(root) { (record, segment) =>
+      val field = Option(record.getField(segment)).getOrElse(
+        throw new IllegalArgumentException(
+          s"jsonExpressionPointer '${pointer.getOrElse("")}' does not resolve against the payloadSchema: " +
+            s"record '${record.getFullName}' declares no field '$segment'"
+        )
+      )
+      requireRecord(unwrapNullable(field.schema()), s"field '$segment' selected by jsonExpressionPointer")
+    }
+
+  private def requireRecord(schema: org.apache.avro.Schema, what: String): org.apache.avro.Schema =
+    if schema.getType == org.apache.avro.Schema.Type.RECORD then schema
+    else
+      throw new IllegalArgumentException(
+        s"$what must be an Avro record to derive iceberg columns from, got '${schema.getType.getName}'"
+      )
+
   /** The payload's root `id` becomes [[PushEventIdColumn]]; every other field keeps its name. */
-  private def renameRootField(name: String): String =
+  private[ingestion] def renameRootField(name: String): String =
     if name == "id" then PushEventIdColumn else name
+
+  /** Applies the [[renameRootField]] rule to a document about to be persisted.
+    *
+    * The rename cannot be left to the consumer: arcane-stream-pull decodes each stored document against the target
+    * table's own schema, and the PullStream CRD exposes no rename map, so a document keeping `id` while the table
+    * declares `push_event_id` fails to decode. Renaming here is what keeps the two halves in agreement.
+    *
+    * Only an object's own top-level member is touched — those are exactly the members that became columns. A document
+    * already carrying `push_event_id` is left alone, since renaming would collide with it.
+    */
+  private[ingestion] def renameReservedRootFields(document: String): String =
+    document.fromJson[Json] match
+      case Right(Json.Obj(fields)) if fields.exists(_._1 == "id") && !fields.exists(_._1 == PushEventIdColumn) =>
+        Json.Obj(fields.map((name, value) => renameRootField(name) -> value)).toString
+      case _ => document
 
   /** Optional Avro fields are encoded as `["null", T]`; the target column type is `T`. */
   private def unwrapNullable(schema: org.apache.avro.Schema): org.apache.avro.Schema =

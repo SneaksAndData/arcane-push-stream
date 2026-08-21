@@ -19,7 +19,8 @@ final case class EndpointConfig(
     schemaSubject: String,
     schemaVersion: Int,
     payloadSchema: Option[String] = None,
-    iceberg: Option[IcebergTableSpec] = None
+    iceberg: Option[IcebergTableSpec] = None,
+    jsonExpressionPointer: Option[String] = None
 )
 
 /** Iceberg target table description sourced from a `DataRoute` CRD.
@@ -35,7 +36,8 @@ final case class IcebergTableSpec(
     tableName: String,
     columns: Seq[IcebergColumnSpec],
     initialProperties: Map[String, String] = Map.empty,
-    payloadSchema: Option[String] = None
+    payloadSchema: Option[String] = None,
+    jsonExpressionPointer: Option[String] = None
 )
 
 final case class IcebergColumnSpec(
@@ -167,6 +169,8 @@ object RouteLoader:
     case ContentTypeError()  => Response.text("Only application/json is accepted").status(Status.UnsupportedMediaType)
     case AccessDeniedError() => Response.status(Status.Forbidden)
     case ParseError()        => Response.text("Parse error").status(Status.BadRequest)
+    case InvalidJsonPathError(pointer) =>
+      Response.text(s"application error: invalid json path for payload: '$pointer'").status(Status.BadRequest)
 
   private def classifyPersistenceError(t: Throwable): AppError =
     DataWriteError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName))
@@ -183,6 +187,7 @@ object RouteLoader:
    * Throws:
    * - SerializationError    - invalid payload                               - 400 BadRequest
    * - SchemaValidationError - payload validation failed                     - 400 BadRequest (with reason)
+   * - InvalidJsonPathError  - jsonExpressionPointer resolves to nothing      - 400 BadRequest
    * - ConnectionError       - e.g.: AWSClient lost connection               - 500 InternalServerError
    * - DataWriteError        - Could not persist the data (AwsDynamoDBError) - 500 InternalServerError
    * - 411 Length Required (Content-Length header is mandatory)
@@ -218,14 +223,30 @@ object RouteLoader:
             // Avro path: the schema is only used to *validate* the payload (by decoding it against
             // the schema); the raw JSON bytes are what gets persisted. Persisting Avro binary here
             // would store unreadable data downstream, so both paths persist identical bytes.
-            payloadBytes <- compiledSchema match
-              case None =>
-                ZIO.succeed(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+            _ <- compiledSchema match
+              case None => ZIO.unit
               case Some(schema) =>
                 ZIO
                   .fromEither(schema.validateAndEncode(body))
                   .mapError(t => SchemaValidationError(Option(t.getMessage).getOrElse(t.getClass.getSimpleName)))
-                  .as(body.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                  .unit
+            // Validation runs against the whole body, since payloadSchema describes what the producer
+            // sends; only afterwards is the pointer applied, so that the document reaching storage is
+            // exactly the one the provisioned iceberg columns were derived from.
+            // The pointer is resolved by the consumer, not here: DynamoDB keeps the document exactly as the
+            // producer sent it, so a route whose pointer changes can be re-streamed from the existing items.
+            // It is still checked on the way in, since a body the pointer misses would only fail much later,
+            // in the stream, with no way back to the request that caused it.
+            _ <- ZIO
+              .fromEither(JsonPointer.extract(body, cfg.jsonExpressionPointer))
+              .mapError(_ => InvalidJsonPathError(cfg.jsonExpressionPointer.getOrElse("")))
+            // A pointer-less route with a target table has its `id` provisioned as `push_event_id`, and the
+            // consumer decodes the stored document against that table without renaming anything, so the
+            // document has to follow. A pointer-bound route needs no rename: the envelope is dropped when the
+            // pointer is applied, so the payload's own `id` no longer collides with the merge key.
+            payloadBytes = (if cfg.iceberg.isDefined && cfg.jsonExpressionPointer.isEmpty then
+                              IcebergProvisionerLive.renameReservedRootFields(body)
+                            else body).getBytes(java.nio.charset.StandardCharsets.UTF_8)
             isValid <- ZIO
               .serviceWithZIO[RequestService](_.enqueueToken(payloadBytes, cfg.producerId, schemaRef))
               .mapError(classifyPersistenceError)

@@ -55,6 +55,11 @@ case class ParseError() extends AppError
 object ParseError:
   given Schema[ParseError] = DeriveSchema.gen[ParseError]
 
+@description("The route's jsonExpressionPointer does not resolve against the request body")
+case class InvalidJsonPathError(pointer: String) extends AppError
+object InvalidJsonPathError:
+  given Schema[InvalidJsonPathError] = DeriveSchema.gen[InvalidJsonPathError]
+
 @description("Request body could not be deserialised")
 case class SerializationError(cause: String) extends AppError
 object SerializationError:

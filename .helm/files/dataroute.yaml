@@ -51,6 +51,27 @@ spec:
                     If set, `schemaSubject` and `schemaVersion` must also be provided so the
                     downstream parquet writer can resolve the writer schema.
                   minLength: 1
+                jsonExpressionPointer:
+                  type: string
+                  description: |
+                    Optional RFC 6901 JSON Pointer selecting the part of the request body that
+                    carries the data, e.g. `/payload`.
+                    The request body is stored whole — the pointer is applied by the consumer, not
+                    at ingestion — so a route whose pointer changes can be re-streamed from the
+                    records already persisted. It is published on the target table as the
+                    `json-pointer-expression` property, which is where arcane-stream-pull reads it
+                    from, since the PullStream CRD has no field to configure it with.
+                    The pointed-at node's top-level fields are "hoisted" into one iceberg column
+                    each: scalars keep their own type, while a nested record, map or array becomes
+                    a single `variant` column. Without it the request body's own top-level fields
+                    become the columns, and a field named `id` is provisioned as `push_event_id`.
+                    A request whose body does not contain the pointer is rejected with
+                    400 "application error: invalid json path for payload".
+                    Must start with `/`; the empty string means the document root and is
+                    equivalent to omitting the field.
+                    Like all table properties it is written at creation time only: changing it on
+                    a route whose table already exists needs the property updated by hand.
+                  pattern: '^(/[^/]*)*$'
                 schemaSubject:
                   type: string
                   description: |
@@ -106,6 +127,9 @@ spec:
                         scalars keep their own type, while a nested `record`, `map` or `array`
                         becomes a single `variant` column holding the document as sent, because
                         its shape is not known until a message arrives.
+                        With a `jsonExpressionPointer` set, the columns are derived from the record
+                        that pointer selects instead of from the payload root, matching the document
+                        that ingestion actually persists.
                         Field-ids are assigned sequentially starting at 1 in declaration order;
                         do not change ordering after creation.
                         The `timestampUTC` and `arcane_merge_key` columns are appended automatically
@@ -135,10 +159,16 @@ spec:
                     initialProperties:
                       type: object
                       description: |
-                        Optional key/value table properties seeded once at creation time
-                        (e.g. `comment` to bootstrap the stream-pull plugin's watermark).
+                        Optional key/value table properties seeded once at creation time.
                         Ignored if the table already exists. Keys and values are passed
                         verbatim to Iceberg's UpdateProperties API.
+                        If `comment` is not given, the provisioner seeds
+                        `{"timestamp":"1970-01-01T00:00:00Z"}`. arcane-stream-pull parses
+                        the entire comment as its watermark JSON and refuses to start when
+                        it is missing or not JSON, so this makes the consumer replay the
+                        table from the beginning rather than fail. Note there is no
+                        `watermark:` prefix -- the comment is the JSON document itself.
+                        Set `comment` explicitly to start from a later point.
                       additionalProperties:
                         type: string
       additionalPrinterColumns:
