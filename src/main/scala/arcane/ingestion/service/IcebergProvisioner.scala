@@ -45,16 +45,20 @@ final class IcebergProvisionerLive extends IcebergProvisioner:
       settings <- ZIO.succeed(buildSettings(spec))
       factory  <- IcebergCatalogFactory.live(settings)
       manager = new IcebergSinkEntityManager(settings, factory)
-      schema <- ZIO.attempt(buildSchema(spec))
-      exists <- manager.tableExists(spec.tableName)
+      schema     <- ZIO.attempt(buildSchema(spec))
+      properties <- ZIO.attempt(creationProperties(resolveColumns(spec)))
+      exists     <- manager.tableExists(spec.tableName)
       _ <- ZIO.when(exists)(
         ZIO.logInfo(s"[IcebergProvisioner] table ${spec.namespace}.${spec.tableName} already exists — skipping create")
       )
       _ <- ZIO.unless(exists)(
-        manager.createTable(CreateTableRequest(spec.tableName, schema, replace = false)) *>
+        manager.createTable(CreateTableRequest(spec.tableName, schema, replace = false, properties = properties)) *>
           applyInitialProperties(factory, settings, spec) *>
           ZIO.logInfo(
-            s"[IcebergProvisioner] created table ${spec.namespace}.${spec.tableName} (${spec.columns.size} columns)"
+            s"[IcebergProvisioner] created table ${spec.namespace}.${spec.tableName} " +
+              s"(${resolveColumns(spec).size} columns${
+                  if properties.isEmpty then "" else s", ${properties.mkString(", ")}"
+                })"
           )
       )
     yield ()
@@ -146,10 +150,28 @@ object IcebergProvisionerLive:
   private def isNoAuthEnabled(env: Map[String, String]): Boolean =
     env.get(CatalogNoAuthEnv).exists(v => Set("1", "true", "yes", "on").contains(v.trim.toLowerCase))
 
+  /** Table property selecting the Iceberg spec version.
+    *
+    * `variant` is a v3 type, so a table declaring one must be created at format version 3. It can only be set when the
+    * table is created — the CRD's `initialProperties` are applied afterwards, which is too late — so it is passed
+    * through [[CreateTableRequest]] instead.
+    */
+  val FormatVersionProperty = "format-version"
+
+  /** Minimum spec version supporting `variant` columns. */
+  val VariantFormatVersion = "3"
+
+  /** Properties applied when the table is created. Tables carrying a variant column are pinned to format version 3;
+    * tables without one keep the catalog's default, so an existing route's table is not silently upgraded.
+    */
+  private[service] def creationProperties(columns: Seq[IcebergColumnSpec]): Map[String, String] =
+    if columns.exists(_.`type`.equalsIgnoreCase("variant")) then Map(FormatVersionProperty -> VariantFormatVersion)
+    else Map.empty
+
   /** Column receiving the payload's own `id`. It is renamed so it cannot be confused with the envelope `id`, which
     * identifies the pushed message and lands in [[MergeKeyColumn]] instead.
     *
-    * Must agree with the `jsonArrayPointers` rename map configured on the consuming arcane-stream-pull instance.
+    * Must agree with the rename map configured on the consuming arcane-stream-pull instance.
     */
   val PushEventIdColumn = "push_event_id"
 
@@ -175,9 +197,14 @@ object IcebergProvisionerLive:
     *
     * It is important to keep the schema fields NOT required, because framework expects all fields to be NULLABLE.
     */
+  /** The final column list for a route: derived from the Avro `payloadSchema` when it declares one, falling back to the
+    * hand-written list otherwise, with the envelope columns appended.
+    */
+  private[service] def resolveColumns(spec: IcebergTableSpec): Seq[IcebergColumnSpec] =
+    withEnvelopeColumns(spec.payloadSchema.map(deriveColumns).getOrElse(spec.columns))
+
   def buildSchema(spec: IcebergTableSpec): Schema =
-    val declared = spec.payloadSchema.map(deriveColumns).getOrElse(spec.columns)
-    val nestedFields = withEnvelopeColumns(declared).zipWithIndex.map { case (col, idx) =>
+    val nestedFields = resolveColumns(spec).zipWithIndex.map { case (col, idx) =>
       val id = idx + 1
       val t  = toIcebergType(col)
       Types.NestedField.optional(id, col.name, t)
@@ -195,12 +222,14 @@ object IcebergProvisionerLive:
 
     columns ++ envelope
 
-  /** Flattens an Avro record schema into the target table's columns.
+  /** Maps an Avro record schema onto the target table's columns, one column per root field.
     *
-    * The stream-pull source hoists the members of a nested record up to the root, so the table declares one column per
-    * nested member rather than a single JSON blob. A `map` or `array` member cannot be flattened — its keys are not
-    * known until a message arrives — so it keeps one string column, which is what the decoder writes for a container
-    * aimed at a string field.
+    * Scalar members keep their own typed column. A `record`, `map` or `array` member becomes a single `variant` column
+    * instead: its shape is not known until a message arrives, so there is no set of typed columns to derive, and
+    * Iceberg's variant encoding preserves the document as the producer sent it while staying queryable. This matches
+    * the framework's own mapping, where those Avro types become `ObjectType` and therefore `VariantType`.
+    *
+    * A table holding a variant column must be created with `format-version=3`; see [[FormatVersionProperty]].
     */
   private[service] def deriveColumns(payloadSchema: String): Seq[IcebergColumnSpec] =
     val parsed = org.apache.avro.Schema.Parser().parse(payloadSchema)
@@ -210,22 +239,16 @@ object IcebergProvisionerLive:
         s"payloadSchema must be an Avro record to derive iceberg columns from, got '${parsed.getType.getName}'"
       )
 
-    val columns = parsed.getFields.asScala.toSeq.flatMap { field =>
+    val columns = parsed.getFields.asScala.toSeq.map { field =>
       val fieldSchema = unwrapNullable(field.schema())
-      fieldSchema.getType match
-        case org.apache.avro.Schema.Type.RECORD =>
-          fieldSchema.getFields.asScala.toSeq.map(nested =>
-            IcebergColumnSpec(nested.name(), toColumnType(unwrapNullable(nested.schema()), nested.name()))
-          )
-        case _ =>
-          Seq(IcebergColumnSpec(renameRootField(field.name()), toColumnType(fieldSchema, field.name())))
+      IcebergColumnSpec(renameRootField(field.name()), toColumnType(fieldSchema, field.name()))
     }
 
     val duplicates = columns.groupBy(_.name.toLowerCase).filter(_._2.size > 1).keys
     if duplicates.nonEmpty then
       throw new IllegalArgumentException(
-        s"payloadSchema flattens to duplicate iceberg columns: ${duplicates.mkString(", ")}. " +
-          "Rename the colliding fields, since a hoisted field would otherwise shadow a root one."
+        s"payloadSchema declares duplicate iceberg columns: ${duplicates.mkString(", ")}. " +
+          "Rename the colliding fields, since iceberg resolves columns case-insensitively."
       )
 
     columns
@@ -252,10 +275,11 @@ object IcebergProvisionerLive:
       case org.apache.avro.Schema.Type.DOUBLE  => "double"
       case org.apache.avro.Schema.Type.BOOLEAN => "boolean"
       case org.apache.avro.Schema.Type.BYTES   => "binary"
-      // keys are unknown until a message arrives, so the container is stored as the json text the decoder produces
-      case org.apache.avro.Schema.Type.MAP    => "string"
-      case org.apache.avro.Schema.Type.ARRAY  => "string"
-      case org.apache.avro.Schema.Type.RECORD => "string"
+      // a container's contents are unknown until a message arrives, so it is stored as a variant rather than being
+      // flattened into typed columns or stringified
+      case org.apache.avro.Schema.Type.MAP    => "variant"
+      case org.apache.avro.Schema.Type.ARRAY  => "variant"
+      case org.apache.avro.Schema.Type.RECORD => "variant"
       case other =>
         throw new IllegalArgumentException(
           s"Unsupported avro type '${other.getName}' for payloadSchema field '$fieldName'"
@@ -271,8 +295,9 @@ object IcebergProvisionerLive:
     case "binary"    => Types.BinaryType.get()
     case "date"      => Types.DateType.get()
     case "timestamp" => Types.TimestampType.withZone()
+    case "variant"   => Types.VariantType.get()
     case other =>
       throw new IllegalArgumentException(
         s"Unsupported iceberg column type '$other' for column '${col.name}'. " +
-          "Supported: string, int, long, double, float, boolean, binary, date, timestamp."
+          "Supported: string, int, long, double, float, boolean, binary, date, timestamp, variant."
       )
