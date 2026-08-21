@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup tools
-        uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+        uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518 # v4.2.5
 
       - name: Build and test
         env:
@@ -46,6 +46,8 @@ jobs:
 
       - uses: 5monkeys/cobertura-action@ee5787cc56634acddedc51f21c7947985531e6eb # v14
         with:
-          path: ./target/scala-3.8.3/coverage-report/cobertura.xml
+          # Glob the Scala binary-version directory rather than hardcoding it, so a
+          # scalaVersion bump in build.sbt does not silently break this step.
+          path: ./target/scala-*/coverage-report/cobertura.xml
           minimum_coverage: 0
 
