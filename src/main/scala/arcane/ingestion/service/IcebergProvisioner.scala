@@ -12,6 +12,8 @@ import org.apache.iceberg.Schema
 import org.apache.iceberg.rest.auth.OAuth2Properties
 import org.apache.iceberg.types.{Type, Types}
 import zio.*
+import zio.json.ast.Json
+import zio.json.DecoderOps
 
 import java.time.{Duration as JavaDuration}
 import scala.jdk.CollectionConverters.*
@@ -190,7 +192,8 @@ object IcebergProvisionerLive:
   /** Column receiving the payload's own `id`. It is renamed so it cannot be confused with the envelope `id`, which
     * identifies the pushed message and lands in [[MergeKeyColumn]] instead.
     *
-    * Must agree with the rename map configured on the consuming arcane-stream-pull instance.
+    * The same rename is applied to the persisted document by [[renameReservedRootFields]], so the stored data and the
+    * provisioned column always carry the same name.
     */
   val PushEventIdColumn = "push_event_id"
 
@@ -220,7 +223,9 @@ object IcebergProvisionerLive:
     * hand-written list otherwise, with the envelope columns appended.
     */
   private[service] def resolveColumns(spec: IcebergTableSpec): Seq[IcebergColumnSpec] =
-    withEnvelopeColumns(spec.payloadSchema.map(deriveColumns).getOrElse(spec.columns))
+    withEnvelopeColumns(
+      spec.payloadSchema.map(deriveColumns(_, spec.jsonExpressionPointer)).getOrElse(spec.columns)
+    )
 
   def buildSchema(spec: IcebergTableSpec): Schema =
     val nestedFields = resolveColumns(spec).zipWithIndex.map { case (col, idx) =>
@@ -241,24 +246,28 @@ object IcebergProvisionerLive:
 
     columns ++ envelope
 
-  /** Maps an Avro record schema onto the target table's columns, one column per root field.
+  /** Maps an Avro record schema onto the target table's columns, one column per field.
+    *
+    * Which record that is depends on `pointer`: without one the payload schema's own root is used, so the request body
+    * maps to the table field for field. With one, the record the pointer selects is used instead and *its* fields are
+    * hoisted into columns — the surrounding envelope contributes nothing. The ingestion endpoint applies the same
+    * pointer to every request body, so the record resolved here describes exactly the document that gets persisted.
     *
     * Scalar members keep their own typed column. A `record`, `map` or `array` member becomes a single `variant` column
     * instead: its shape is not known until a message arrives, so there is no set of typed columns to derive, and
     * Iceberg's variant encoding preserves the document as the producer sent it while staying queryable. This matches
-    * the framework's own mapping, where those Avro types become `ObjectType` and therefore `VariantType`.
+    * the framework's own mapping, where those Avro types become `ObjectType` and therefore `VariantType`. Hoisting
+    * therefore only ever descends one level: whatever sits below the pointed-at record stays inside a variant.
     *
     * A table holding a variant column must be created with `format-version=3`; see [[FormatVersionProperty]].
     */
-  private[service] def deriveColumns(payloadSchema: String): Seq[IcebergColumnSpec] =
-    val parsed = org.apache.avro.Schema.Parser().parse(payloadSchema)
+  private[service] def deriveColumns(
+      payloadSchema: String,
+      pointer: Option[String] = None
+  ): Seq[IcebergColumnSpec] =
+    val record = resolvePayloadRecord(payloadSchema, pointer)
 
-    if parsed.getType != org.apache.avro.Schema.Type.RECORD then
-      throw new IllegalArgumentException(
-        s"payloadSchema must be an Avro record to derive iceberg columns from, got '${parsed.getType.getName}'"
-      )
-
-    val columns = parsed.getFields.asScala.toSeq.map { field =>
+    val columns = record.getFields.asScala.toSeq.map { field =>
       val fieldSchema = unwrapNullable(field.schema())
       IcebergColumnSpec(renameRootField(field.name()), toColumnType(fieldSchema, field.name()))
     }
@@ -272,9 +281,53 @@ object IcebergProvisionerLive:
 
     columns
 
+  /** Walks `pointer` through the payload schema and returns the record whose fields become the table's columns.
+    *
+    * Traversal only crosses record members. A pointer reaching into a map or an array cannot name a stable set of
+    * fields — a map's keys are unknown until a message arrives, and an array index would pick one element out of many —
+    * so those are rejected here rather than producing a table that silently fails to match the data.
+    */
+  private[service] def resolvePayloadRecord(
+      payloadSchema: String,
+      pointer: Option[String]
+  ): org.apache.avro.Schema =
+    val root = requireRecord(org.apache.avro.Schema.Parser().parse(payloadSchema), "payloadSchema")
+
+    JsonPointer.segments(pointer).foldLeft(root) { (record, segment) =>
+      val field = Option(record.getField(segment)).getOrElse(
+        throw new IllegalArgumentException(
+          s"jsonExpressionPointer '${pointer.getOrElse("")}' does not resolve against the payloadSchema: " +
+            s"record '${record.getFullName}' declares no field '$segment'"
+        )
+      )
+      requireRecord(unwrapNullable(field.schema()), s"field '$segment' selected by jsonExpressionPointer")
+    }
+
+  private def requireRecord(schema: org.apache.avro.Schema, what: String): org.apache.avro.Schema =
+    if schema.getType == org.apache.avro.Schema.Type.RECORD then schema
+    else
+      throw new IllegalArgumentException(
+        s"$what must be an Avro record to derive iceberg columns from, got '${schema.getType.getName}'"
+      )
+
   /** The payload's root `id` becomes [[PushEventIdColumn]]; every other field keeps its name. */
-  private def renameRootField(name: String): String =
+  private[ingestion] def renameRootField(name: String): String =
     if name == "id" then PushEventIdColumn else name
+
+  /** Applies the [[renameRootField]] rule to a document about to be persisted.
+    *
+    * The rename cannot be left to the consumer: arcane-stream-pull decodes each stored document against the target
+    * table's own schema, and the PullStream CRD exposes no rename map, so a document keeping `id` while the table
+    * declares `push_event_id` fails to decode. Renaming here is what keeps the two halves in agreement.
+    *
+    * Only an object's own top-level member is touched — those are exactly the members that became columns. A document
+    * already carrying `push_event_id` is left alone, since renaming would collide with it.
+    */
+  private[ingestion] def renameReservedRootFields(document: String): String =
+    document.fromJson[Json] match
+      case Right(Json.Obj(fields)) if fields.exists(_._1 == "id") && !fields.exists(_._1 == PushEventIdColumn) =>
+        Json.Obj(fields.map((name, value) => renameRootField(name) -> value)).toString
+      case _ => document
 
   /** Optional Avro fields are encoded as `["null", T]`; the target column type is `T`. */
   private def unwrapNullable(schema: org.apache.avro.Schema): org.apache.avro.Schema =

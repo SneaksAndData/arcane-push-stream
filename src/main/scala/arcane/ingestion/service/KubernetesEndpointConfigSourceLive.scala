@@ -85,7 +85,8 @@ object KubernetesEndpointConfigSourceLive:
       schemaSubject = spec.schemaSubject,
       schemaVersion = spec.schemaVersion.toInt,
       payloadSchema = spec.payloadSchema.toOption,
-      iceberg = toIcebergSpec(spec)
+      iceberg = toIcebergSpec(spec),
+      jsonExpressionPointer = spec.jsonExpressionPointer.toOption.filter(_.nonEmpty)
     ))).getOrElse(acc)
 
   /** Project the generated CRD `spec.iceberg` block (if present) onto our local [[IcebergTableSpec]]. Fields declared
@@ -113,7 +114,8 @@ object KubernetesEndpointConfigSourceLive:
           initialProperties = ice.initialProperties.toOption
             .map(_.iterator.toMap)
             .getOrElse(Map.empty),
-          payloadSchema = payloadSchema
+          payloadSchema = payloadSchema,
+          jsonExpressionPointer = spec.jsonExpressionPointer.toOption.filter(_.nonEmpty)
         )
       )
     }

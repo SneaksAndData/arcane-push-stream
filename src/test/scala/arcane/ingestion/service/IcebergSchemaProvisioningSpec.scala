@@ -61,7 +61,8 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
   private def specOf(
       payloadSchema: Option[String],
       columns: Seq[IcebergColumnSpec] = Seq.empty,
-      initialProperties: Map[String, String] = Map.empty
+      initialProperties: Map[String, String] = Map.empty,
+      jsonExpressionPointer: Option[String] = None
   ) =
     IcebergTableSpec(
       catalogUri = "http://localhost:20001/catalog",
@@ -70,7 +71,8 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
       tableName = "events",
       columns = columns,
       payloadSchema = payloadSchema,
-      initialProperties = initialProperties
+      initialProperties = initialProperties,
+      jsonExpressionPointer = jsonExpressionPointer
     )
 
   private def layoutOf(spec: IcebergTableSpec): Seq[(String, String)] =
@@ -257,6 +259,176 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
         IcebergProvisionerLive.initialProperties(
           specOf(Some(nestedRecordSchema), initialProperties = Map("owner" -> "data-platform"))
         ) == Map("owner" -> "data-platform", "comment" -> """{"timestamp":"1970-01-01T00:00:00Z"}""")
+      )
+    },
+    test("hoists the pointed-at record's fields into columns of their own") {
+      // the envelope (id, timestampUTC) is dropped at ingestion, so it must not appear in the table either
+      val layout = layoutOf(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("/payload")))
+
+      assertTrue(
+        layout.contains("eventType"  -> "string"),
+        layout.contains("sequence"   -> "int"),
+        layout.contains("durationMs" -> "long"),
+        layout.contains("score"      -> "double"),
+        layout.contains("isRetry"    -> "boolean"),
+        !layout.exists(_._1 == "id"),
+        !layout.exists(_._1 == "payload")
+      )
+    },
+    test("keeps a container member of the pointed-at record as a variant") {
+      val schema =
+        """
+          |{
+          |  "type": "record",
+          |  "name": "Producer3Event",
+          |  "namespace": "com.sneaksanddata.pushstream",
+          |  "fields": [
+          |    { "name": "id", "type": "string" },
+          |    {
+          |      "name": "payload",
+          |      "type": {
+          |        "type": "record",
+          |        "name": "Producer3Payload",
+          |        "namespace": "com.sneaksanddata.pushstream",
+          |        "fields": [
+          |          { "name": "eventType", "type": "string" },
+          |          { "name": "attributes", "type": { "type": "map", "values": "string" } },
+          |          { "name": "tags", "type": { "type": "array", "items": "string" } }
+          |        ]
+          |      }
+          |    }
+          |  ]
+          |}
+          |""".stripMargin
+
+      val layout = layoutOf(specOf(Some(schema), jsonExpressionPointer = Some("/payload")))
+
+      assertTrue(
+        layout.contains("eventType"  -> "string"),
+        layout.contains("attributes" -> "variant"),
+        layout.contains("tags"       -> "variant")
+      )
+    },
+    test("derives the same layout for an absent and an empty pointer") {
+      assertTrue(
+        layoutOf(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some(""))) ==
+          layoutOf(specOf(Some(nestedRecordSchema)))
+      )
+    },
+    test("follows a pointer through more than one record") {
+      val schema =
+        """
+          |{
+          |  "type": "record",
+          |  "name": "Producer4Event",
+          |  "namespace": "com.sneaksanddata.pushstream",
+          |  "fields": [
+          |    {
+          |      "name": "envelope",
+          |      "type": {
+          |        "type": "record",
+          |        "name": "Producer4Envelope",
+          |        "namespace": "com.sneaksanddata.pushstream",
+          |        "fields": [
+          |          {
+          |            "name": "body",
+          |            "type": {
+          |              "type": "record",
+          |              "name": "Producer4Body",
+          |              "namespace": "com.sneaksanddata.pushstream",
+          |              "fields": [ { "name": "eventType", "type": "string" } ]
+          |            }
+          |          }
+          |        ]
+          |      }
+          |    }
+          |  ]
+          |}
+          |""".stripMargin
+
+      assertTrue(
+        layoutOf(specOf(Some(schema), jsonExpressionPointer = Some("/envelope/body"))).contains("eventType" -> "string")
+      )
+    },
+    test("hoists through a nullable record member") {
+      val schema =
+        """
+          |{
+          |  "type": "record",
+          |  "name": "Producer5Event",
+          |  "namespace": "com.sneaksanddata.pushstream",
+          |  "fields": [
+          |    {
+          |      "name": "payload",
+          |      "type": [
+          |        "null",
+          |        {
+          |          "type": "record",
+          |          "name": "Producer5Payload",
+          |          "namespace": "com.sneaksanddata.pushstream",
+          |          "fields": [ { "name": "eventType", "type": "string" } ]
+          |        }
+          |      ]
+          |    }
+          |  ]
+          |}
+          |""".stripMargin
+
+      assertTrue(
+        layoutOf(specOf(Some(schema), jsonExpressionPointer = Some("/payload"))).contains("eventType" -> "string")
+      )
+    },
+    test("rejects a pointer that names no field in the payload schema") {
+      assertZIO(
+        ZIO
+          .attempt(
+            IcebergProvisionerLive.buildSchema(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("/body")))
+          )
+          .exit
+      )(
+        fails(isSubtype[IllegalArgumentException](hasMessage(containsString("declares no field 'body'"))))
+      )
+    },
+    test("rejects a pointer that lands on a container rather than a record") {
+      assertZIO(
+        ZIO
+          .attempt(
+            IcebergProvisionerLive.buildSchema(specOf(Some(mapPayloadSchema), jsonExpressionPointer = Some("/payload")))
+          )
+          .exit
+      )(
+        fails(isSubtype[IllegalArgumentException](hasMessage(containsString("must be an Avro record"))))
+      )
+    },
+    test("rejects a pointer that is not a JSON Pointer") {
+      assertZIO(
+        ZIO
+          .attempt(
+            IcebergProvisionerLive
+              .buildSchema(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("payload")))
+          )
+          .exit
+      )(
+        fails(isSubtype[IllegalArgumentException](hasMessage(containsString("RFC 6901"))))
+      )
+    },
+    test("renames a document's root id to match the provisioned column") {
+      // the consumer decodes the stored document against the table, and the PullStream CRD exposes no rename map,
+      // so the document has to arrive already carrying the column name
+      assertTrue(
+        IcebergProvisionerLive.renameReservedRootFields("""{"id":"o-1","amount":42}""") ==
+          """{"push_event_id":"o-1","amount":42}"""
+      )
+    },
+    test("leaves a document that already uses the provisioned column name alone") {
+      val document = """{"push_event_id":"o-1","id":"inner"}"""
+      assertTrue(IcebergProvisionerLive.renameReservedRootFields(document) == document)
+    },
+    test("leaves a nested id and a document without one untouched") {
+      val nested = """{"payload":{"id":"inner"}}"""
+      assertTrue(
+        IcebergProvisionerLive.renameReservedRootFields(nested) == nested,
+        IcebergProvisionerLive.renameReservedRootFields("""{"amount":42}""") == """{"amount":42}"""
       )
     }
   )

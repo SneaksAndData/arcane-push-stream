@@ -51,6 +51,22 @@ spec:
                     If set, `schemaSubject` and `schemaVersion` must also be provided so the
                     downstream parquet writer can resolve the writer schema.
                   minLength: 1
+                jsonExpressionPointer:
+                  type: string
+                  description: |
+                    Optional RFC 6901 JSON Pointer selecting the part of the request body that
+                    carries the data, e.g. `/payload`. The pointer is resolved at ingestion time
+                    and only the node it selects is persisted, so what lands in DynamoDB is
+                    already the document the target table describes.
+                    Its top-level fields are "hoisted" into one iceberg column each: scalars keep
+                    their own type, while a nested record, map or array becomes a single `variant`
+                    column. Without it the request body itself is persisted and its own top-level
+                    fields become the columns.
+                    A request whose body does not contain the pointer is rejected with
+                    400 "application error: invalid json path for payload".
+                    Must start with `/`; the empty string means the document root and is
+                    equivalent to omitting the field.
+                  pattern: '^(/[^/]*)*$'
                 schemaSubject:
                   type: string
                   description: |
@@ -106,6 +122,9 @@ spec:
                         scalars keep their own type, while a nested `record`, `map` or `array`
                         becomes a single `variant` column holding the document as sent, because
                         its shape is not known until a message arrives.
+                        With a `jsonExpressionPointer` set, the columns are derived from the record
+                        that pointer selects instead of from the payload root, matching the document
+                        that ingestion actually persists.
                         Field-ids are assigned sequentially starting at 1 in declaration order;
                         do not change ordering after creation.
                         The `timestampUTC` and `arcane_merge_key` columns are appended automatically

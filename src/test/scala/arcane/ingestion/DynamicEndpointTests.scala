@@ -4,7 +4,14 @@ import zio._
 import zio.test._
 import zio.test.Assertion._
 import zio.http._
-import arcane.ingestion.api.v1.{EndpointConfig, RouteLoader, RouteRegistry, SchemaRef}
+import arcane.ingestion.api.v1.{
+  EndpointConfig,
+  IcebergColumnSpec,
+  IcebergTableSpec,
+  RouteLoader,
+  RouteRegistry,
+  SchemaRef
+}
 import arcane.ingestion.observability.IngestionMetrics
 import arcane.ingestion.service.RequestService
 
@@ -227,6 +234,106 @@ object DynamicEndpointTests extends ZIOSpecDefault {
         plainBytes.map(new String(_, java.nio.charset.StandardCharsets.UTF_8)).contains(payload),
         withBytes.zip(plainBytes).exists((a, b) => a.sameElements(b)),
         withBody == plainBody.replace(schemaless.producerId, schemaBound.producerId)
+      )
+    },
+    test("persists only the document the jsonExpressionPointer selects") {
+      val avroSchema =
+        """{
+          |  "type": "record",
+          |  "name": "Order",
+          |  "namespace": "test",
+          |  "fields": [
+          |    { "name": "id", "type": "string" },
+          |    {
+          |      "name": "payload",
+          |      "type": {
+          |        "type": "record",
+          |        "name": "OrderPayload",
+          |        "namespace": "test",
+          |        "fields": [ { "name": "amount", "type": "int" } ]
+          |      }
+          |    }
+          |  ]
+          |}""".stripMargin
+      val cfg = EndpointConfig(
+        producerId = "pointer-test",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = Some(avroSchema),
+        jsonExpressionPointer = Some("/payload")
+      )
+      for
+        _      <- ZIO.succeed(queue.clear())
+        routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), fakeRequestService, noopMetrics)
+        // the envelope is validated against the full schema, then dropped: the stored document has to line up
+        // with the hoisted iceberg columns, which are derived from the pointed-at record alone
+        res <- routes.run(post("api/v1/pointer-test/data", """{"id":"o-1","payload":{"amount":42}}"""))
+      yield assertTrue(
+        res.status == Status.Accepted,
+        queue
+          .get("pointer-test")
+          .map(new String(_, java.nio.charset.StandardCharsets.UTF_8))
+          .contains("""{"amount":42}""")
+      )
+    },
+    test("rejects a payload the jsonExpressionPointer does not resolve against") {
+      val cfg = EndpointConfig(
+        producerId = "pointer-missing",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = None,
+        jsonExpressionPointer = Some("/payload")
+      )
+      for
+        _      <- ZIO.succeed(queue.clear())
+        routes <- RouteLoader.build(apiVersion, maxContentLengthBytes, List(cfg), fakeRequestService, noopMetrics)
+        res    <- routes.run(post("api/v1/pointer-missing/data", """{"id":"o-1"}"""))
+        body   <- res.body.asString
+      yield assertTrue(
+        res.status == Status.BadRequest,
+        body == "application error: invalid json path for payload: '/payload'",
+        // nothing is stored, so a misconfigured route cannot quietly fill the table with unusable documents
+        queue.get("pointer-missing").isEmpty
+      )
+    },
+    test("renames a root id on an iceberg-bound route so the document matches the column") {
+      val cfg = EndpointConfig(
+        producerId = "rename-test",
+        schemaSubject = "orders",
+        schemaVersion = 3,
+        payloadSchema = None,
+        iceberg = Some(
+          IcebergTableSpec(
+            catalogUri = "http://localhost:20001/catalog",
+            warehouse = "lakehouse-bronze",
+            namespace = "arcane_pull_test",
+            tableName = "events",
+            columns = Seq(IcebergColumnSpec("push_event_id", "string"))
+          )
+        )
+      )
+      val plain = cfg.copy(producerId = "rename-none", iceberg = None)
+      for
+        _ <- ZIO.succeed(queue.clear())
+        routes <- RouteLoader.build(
+          apiVersion,
+          maxContentLengthBytes,
+          List(cfg, plain),
+          fakeRequestService,
+          noopMetrics
+        )
+        _ <- routes.run(post("api/v1/rename-test/data", """{"id":"o-1","amount":42}"""))
+        _ <- routes.run(post("api/v1/rename-none/data", """{"id":"o-1","amount":42}"""))
+      yield assertTrue(
+        queue
+          .get("rename-test")
+          .map(new String(_, java.nio.charset.StandardCharsets.UTF_8))
+          .contains("""{"push_event_id":"o-1","amount":42}"""),
+        // a route without a target table has no column to match, so the producer's names are left as sent
+        queue
+          .get("rename-none")
+          .map(new String(_, java.nio.charset.StandardCharsets.UTF_8))
+          .contains("""{"id":"o-1","amount":42}""")
       )
     },
     test("Returns 500 if DynamoDB not available") {
