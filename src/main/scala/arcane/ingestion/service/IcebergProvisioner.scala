@@ -65,29 +65,28 @@ final class IcebergProvisionerLive extends IcebergProvisioner:
   }
 
   /** Seed table-level properties (e.g. the stream-pull watermark COMMENT) that the CRD declared under
-    * `initialProperties`. Only applied on initial creation to keep the operation a one-shot bootstrap; if the table
-    * already existed we leave properties untouched.
+    * `initialProperties`, plus the watermark comment default from [[initialProperties]]. Only applied on initial
+    * creation to keep the operation a one-shot bootstrap; if the table already existed we leave properties untouched.
     */
   private def applyInitialProperties(
       factory: IcebergCatalogFactory,
       settings: IcebergCatalogSettings,
       spec: IcebergTableSpec
   ): Task[Unit] =
-    if spec.initialProperties.isEmpty then ZIO.unit
-    else
-      for
-        catalog <- factory.getCatalog
-        tableId = org.apache.iceberg.catalog.TableIdentifier.of(settings.namespace, spec.tableName)
-        table <- ZIO.attemptBlocking(catalog.loadTable(factory.getSessionContext, tableId))
-        _ <- ZIO.attemptBlocking {
-          val update = table.updateProperties()
-          spec.initialProperties.foreach { case (k, v) => update.set(k, v) }
-          update.commit()
-        }
-        _ <- ZIO.logInfo(
-          s"[IcebergProvisioner] seeded ${spec.initialProperties.size} initial properties on ${spec.namespace}.${spec.tableName}"
-        )
-      yield ()
+    val properties = initialProperties(spec)
+    for
+      catalog <- factory.getCatalog
+      tableId = org.apache.iceberg.catalog.TableIdentifier.of(settings.namespace, spec.tableName)
+      table <- ZIO.attemptBlocking(catalog.loadTable(factory.getSessionContext, tableId))
+      _ <- ZIO.attemptBlocking {
+        val update = table.updateProperties()
+        properties.foreach { case (k, v) => update.set(k, v) }
+        update.commit()
+      }
+      _ <- ZIO.logInfo(
+        s"[IcebergProvisioner] seeded ${properties.size} initial properties on ${spec.namespace}.${spec.tableName}"
+      )
+    yield ()
 
 object IcebergProvisionerLive:
   private val CatalogNoAuthEnv            = "ARCANE_FRAMEWORK__CATALOG_NO_AUTH"
@@ -167,6 +166,26 @@ object IcebergProvisionerLive:
   private[service] def creationProperties(columns: Seq[IcebergColumnSpec]): Map[String, String] =
     if columns.exists(_.`type`.equalsIgnoreCase("variant")) then Map(FormatVersionProperty -> VariantFormatVersion)
     else Map.empty
+
+  /** Table property holding the arcane-stream-pull watermark. */
+  val CommentProperty = "comment"
+
+  /** Watermark seeded as the table COMMENT when the route declares none.
+    *
+    * arcane-stream-pull parses the *entire* comment as its watermark JSON, and dies with "Invalid watermark value" when
+    * it is absent or not JSON, so a table provisioned without one cannot be consumed until an operator issues a COMMENT
+    * ON by hand. The epoch makes the consumer replay from the beginning, which is the right starting point for a table
+    * that has never been read. Note the value carries no `watermark:` prefix — the comment is the JSON.
+    */
+  val EpochWatermarkComment = """{"timestamp":"1970-01-01T00:00:00Z"}"""
+
+  /** Properties seeded on the table right after creation: whatever the route declared, with the watermark comment
+    * filled in when it left one out. A comment the route does declare is honoured as-is, so a route that wants to start
+    * from a later point keeps control of it.
+    */
+  private[service] def initialProperties(spec: IcebergTableSpec): Map[String, String] =
+    if spec.initialProperties.contains(CommentProperty) then spec.initialProperties
+    else spec.initialProperties + (CommentProperty -> EpochWatermarkComment)
 
   /** Column receiving the payload's own `id`. It is renamed so it cannot be confused with the envelope `id`, which
     * identifies the pushed message and lands in [[MergeKeyColumn]] instead.

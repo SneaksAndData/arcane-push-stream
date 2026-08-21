@@ -135,10 +135,16 @@ spec:
                     initialProperties:
                       type: object
                       description: |
-                        Optional key/value table properties seeded once at creation time
-                        (e.g. `comment` to bootstrap the stream-pull plugin's watermark).
+                        Optional key/value table properties seeded once at creation time.
                         Ignored if the table already exists. Keys and values are passed
                         verbatim to Iceberg's UpdateProperties API.
+                        If `comment` is not given, the provisioner seeds
+                        `{"timestamp":"1970-01-01T00:00:00Z"}`. arcane-stream-pull parses
+                        the entire comment as its watermark JSON and refuses to start when
+                        it is missing or not JSON, so this makes the consumer replay the
+                        table from the beginning rather than fail. Note there is no
+                        `watermark:` prefix -- the comment is the JSON document itself.
+                        Set `comment` explicitly to start from a later point.
                       additionalProperties:
                         type: string
       additionalPrinterColumns:

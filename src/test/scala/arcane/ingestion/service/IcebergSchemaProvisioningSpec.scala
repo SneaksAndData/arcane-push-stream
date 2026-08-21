@@ -58,14 +58,19 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
       |}
       |""".stripMargin
 
-  private def specOf(payloadSchema: Option[String], columns: Seq[IcebergColumnSpec] = Seq.empty) =
+  private def specOf(
+      payloadSchema: Option[String],
+      columns: Seq[IcebergColumnSpec] = Seq.empty,
+      initialProperties: Map[String, String] = Map.empty
+  ) =
     IcebergTableSpec(
       catalogUri = "http://localhost:20001/catalog",
       warehouse = "lakehouse-bronze",
       namespace = "arcane_pull_test",
       tableName = "events",
       columns = columns,
-      payloadSchema = payloadSchema
+      payloadSchema = payloadSchema,
+      initialProperties = initialProperties
     )
 
   private def layoutOf(spec: IcebergTableSpec): Seq[(String, String)] =
@@ -229,6 +234,29 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
         ZIO.attempt(IcebergProvisionerLive.buildSchema(specOf(Some("""{"type":"map","values":"string"}""")))).exit
       )(
         fails(isSubtype[IllegalArgumentException](hasMessage(containsString("must be an Avro record"))))
+      )
+    },
+    test("seeds an epoch watermark comment on a route that declares none") {
+      // arcane-stream-pull parses the whole comment as its watermark and refuses to start without one, so a table
+      // provisioned without a comment would need a manual COMMENT ON before it could ever be consumed
+      assertTrue(
+        IcebergProvisionerLive.initialProperties(specOf(Some(nestedRecordSchema))) ==
+          Map("comment" -> """{"timestamp":"1970-01-01T00:00:00Z"}""")
+      )
+    },
+    test("keeps a watermark comment the route declares itself") {
+      val declared = """{"timestamp":"2026-01-01T00:00:00Z"}"""
+      assertTrue(
+        IcebergProvisionerLive.initialProperties(
+          specOf(Some(nestedRecordSchema), initialProperties = Map("comment" -> declared))
+        ) == Map("comment" -> declared)
+      )
+    },
+    test("seeds the watermark comment alongside other declared properties") {
+      assertTrue(
+        IcebergProvisionerLive.initialProperties(
+          specOf(Some(nestedRecordSchema), initialProperties = Map("owner" -> "data-platform"))
+        ) == Map("owner" -> "data-platform", "comment" -> """{"timestamp":"1970-01-01T00:00:00Z"}""")
       )
     }
   )
