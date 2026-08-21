@@ -83,16 +83,16 @@ lazy val root = project
       // 0.9.1, and zio-json follows early-semver, so 0.10.x is treated as binary
       // incompatible and fails the eviction check. Bump this only together with a
       // zio-schema release that targets zio-json 0.10.x.
-      "dev.zio"             %% "zio-json"                 % "0.9.2",
-      "dev.zio"             %% "zio-schema"               % "1.8.6",
-      "dev.zio"             %% "zio-schema-derivation"    % "1.8.6",
-      "dev.zio"             %% "zio-streams"              % zioVersion,
-      "dev.zio"             %% "zio-dynamodb"             % "1.0.0-RC26",
+      "dev.zio" %% "zio-json"              % "0.9.2",
+      "dev.zio" %% "zio-schema"            % "1.8.6",
+      "dev.zio" %% "zio-schema-derivation" % "1.8.6",
+      "dev.zio" %% "zio-streams"           % zioVersion,
+      "dev.zio" %% "zio-dynamodb"          % "1.0.0-RC26",
 
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
       // identical to what the plugin will read/write.
-      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-109-gd56712f",
+      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-111-gb5cafc5",
 
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
