@@ -21,6 +21,10 @@ persistence:
   endpoint: "http://localhost:8000"
   # Auto-create the table on startup. Useful for local dev; should be false in prod (use IaC).
   autoCreateTable: true
+  # Item attribute holding the DynamoDB TTL expiry (Unix timestamp in seconds).
+  ttlAttribute: "expiresAt"
+  # Token retention window in days. Set to 0 to stop stamping a TTL (items never expire).
+  ttlDays: 5
 
 # Use in-memory queue (good for testing/local deployment)
 #

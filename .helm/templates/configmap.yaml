@@ -33,6 +33,8 @@ data:
       endpoint: {{ .Values.settings.persistence.dynamoDB.endpoint | quote }}
       {{- end }}
       autoCreateTable: {{ .Values.settings.persistence.dynamoDB.autoCreateTable }}
+      ttlAttribute: {{ .Values.settings.persistence.dynamoDB.ttlAttribute | quote }}
+      ttlDays: {{ .Values.settings.persistence.dynamoDB.ttlDays }}
       {{- else if eq .Values.settings.persistence.type "inMemory" }}
       queueCapacity: {{ .Values.settings.persistence.inMemory.queueCapacity }}
       {{- end }}
