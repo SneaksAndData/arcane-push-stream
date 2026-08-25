@@ -36,12 +36,6 @@ object LogAspect {
       .succeed(req.headers.get("X-Correlation-ID"))
       .flatMap(id => Random.nextUUID.map(uuid => id.getOrElse(uuid.toString)))
 
-  /** The annotations describing one request: which endpoint was called, by which method, from where, under which
-    * correlation id. `url` and `method` deliberately reuse the keys and values that `Middleware.requestLogging` puts on
-    * its access log line. Naming them anything else (`http-path`, `http-method`) made that one line carry both
-    * spellings of the same fact; sharing the key means the inner annotation simply replaces this one with an identical
-    * value.
-    */
   private def requestAnnotations(req: Request): UIO[Set[LogAnnotation]] =
     correlationId(req).map { id =>
       Set(
