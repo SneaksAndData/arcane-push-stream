@@ -58,7 +58,9 @@ object AppConfigSpec extends ZIOSpecDefault {
         cfg.server.nThreads == 8,
         cfg.server.maxContentLengthBytes == 400L * 1024L,
         dynamo.autoCreateTable == false,
-        dynamo.endpoint.isEmpty
+        dynamo.endpoint.isEmpty,
+        dynamo.ttlAttribute == "expiresAt",
+        dynamo.ttlDays == 5
       )
     },
     test("env overrides YAML, defaults fill the rest (no CLI args)") {
@@ -100,6 +102,28 @@ object AppConfigSpec extends ZIOSpecDefault {
         cfg.persistence match {
           case m: PersistenceProvider.InMemory => m.queueCapacity == 42
           case _                               => false
+        }
+      )
+    },
+    test("DynamoDB TTL settings are overridable from YAML and env") {
+      val yaml =
+        """|persistence:
+           |  type: dynamoDB
+           |  ttlAttribute: from-yaml-ttl-attribute
+           |  ttlDays: 5
+           |""".stripMargin
+
+      // Terraform passes the production retention window through this env var.
+      val env = Map("ARCANE_INGESTION__PERSISTENCE__TTL_DAYS" -> "3")
+
+      for {
+        yamlProvider <- YamlConfigProvider.fromYamlStringZIO(yaml)
+        cfg          <- AppConfig.loadFrom(ZIOAppArgs(Chunk.empty), env, yamlProvider)
+      } yield assertTrue(
+        cfg.persistence match {
+          case d: PersistenceProvider.DynamoDB =>
+            d.ttlAttribute == "from-yaml-ttl-attribute" && d.ttlDays == 3
+          case _ => false
         }
       )
     },

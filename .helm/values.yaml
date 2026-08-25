@@ -188,6 +188,11 @@ settings:
       endpoint: ""
       # Whether to create the table on startup if missing. Recommended false in production.
       autoCreateTable: false
+      # Item attribute holding the DynamoDB TTL expiry (a Unix timestamp in seconds).
+      # Must match the `ttl.attribute_name` of the Terraform-managed table.
+      ttlAttribute: "expiresAt"
+      # Token retention window in days. Set to 0 to stop stamping a TTL (items never expire).
+      ttlDays: 5
     inMemory:
       # Per-producer sliding queue capacity. Once full, the oldest record is evicted.
       queueCapacity: 10000
