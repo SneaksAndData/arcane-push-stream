@@ -44,10 +44,16 @@ spec:
                     that incoming request payloads for this route must validate against before
                     being enqueued. The server parses this string into an Avro Schema once at
                     load time, then for each request:
-                      1. parses the JSON body using Avro's JSON decoder against this schema
-                         (this both validates the payload and produces a GenericRecord),
-                      2. encodes the GenericRecord to Avro binary,
-                      3. stores the resulting bytes in the DynamoDB `payload` (Binary) attribute.
+                      1. infers the Avro union branch tag for every value that needs one, so
+                         request bodies are plain JSON ({"reading": 1.5}) rather than Avro's
+                         own JSON encoding ({"reading": {"double": 1.5}}); bodies already
+                         written in the tagged form are accepted unchanged,
+                      2. decodes the result with Avro's JSON decoder against this schema, which
+                         validates the payload; every field the schema declares must be present,
+                      3. stores the request body as JSON in the DynamoDB `payload` attribute.
+                         The decoded record is used for validation only -- persisting Avro binary
+                         would leave the stored document unreadable to consumers, which read it
+                         back as JSON.
                     If set, `schemaSubject` and `schemaVersion` must also be provided so the
                     downstream parquet writer can resolve the writer schema.
                   minLength: 1
