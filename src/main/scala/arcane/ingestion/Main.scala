@@ -54,10 +54,14 @@ object Main extends ZIOAppDefault {
           _ <- DynamicRoutingApp.reloader
           // keep health/readiness endpoints out of middleware to reduce requestLogging middleware noise.
           // Everything else always gets a span (see LogAspect) plus a per-request access log line.
+          // The request-context annotations are applied outermost so they also reach the access log line, which
+          // `requestLogging` emits from outside the handler and which would otherwise name no endpoint.
           _ <- Server.serve(
             HealthEndpoint.routes
               ++ ReadinessEndpoint.routes
-              ++ ((swaggerRoutes ++ DynamicServer.routes) @@ Middleware.requestLogging())
+              ++ ((swaggerRoutes ++ DynamicServer.routes)
+                @@ Middleware.requestLogging()
+                @@ LogAspect.annotateRequestContext)
           )
         } yield ())
       }

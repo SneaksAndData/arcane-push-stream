@@ -4,6 +4,10 @@
         <keepAliveDuration>20 seconds</keepAliveDuration>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <includeMdc>true</includeMdc>
+            <!-- ZIO log annotations arrive as SLF4J key-value pairs rather than MDC entries, so this is what
+                 puts `http-path`, `http-method`, `client-ip` and `correlation-id` into the JSON sent to DataDog
+                 and makes a request filterable by endpoint there. -->
+            <includeKeyValuePairs>true</includeKeyValuePairs>
             <customFields>
                 {
                 "service":"arcane-push-stream",
@@ -24,7 +28,7 @@
 
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <layout>
-            <Pattern>%d [%thread] %-5level %logger{35} - %msg%n</Pattern>
+            <Pattern>%d [%thread] %-5level %logger{35} - %msg %kvp%n</Pattern>
         </layout>
     </appender>
 
