@@ -38,14 +38,18 @@ object LogAspect {
 
   /** The annotations describing one request: which endpoint was called, by which method, from where, under which
     * correlation id.
+    *
+    * `url` and `method` deliberately reuse the keys and values that `Middleware.requestLogging` puts on its access log
+    * line. Naming them anything else (`http-path`, `http-method`) made that one line carry both spellings of the same
+    * fact; sharing the key means the inner annotation simply replaces this one with an identical value.
     */
   private def requestAnnotations(req: Request): UIO[Set[LogAnnotation]] =
     correlationId(req).map { id =>
       Set(
         LogAnnotation("correlation-id", id),
         LogAnnotation("client-ip", clientIp(req)),
-        LogAnnotation("http-method", req.method.toString),
-        LogAnnotation("http-path", req.path.toString)
+        LogAnnotation("method", req.method.toString),
+        LogAnnotation("url", req.url.encode)
       )
     }
 
@@ -57,7 +61,7 @@ object LogAspect {
     * that matched no route — without a path on it.
     *
     * Applied outermost, it covers the access log line, the handler's own lines and the not-found handler alike, so a
-    * single `http-path` filter returns everything that happened while serving a request.
+    * single `url` filter returns everything that happened while serving a request.
     */
   def annotateRequestContext: Middleware[Any] = new Middleware[Any] {
     override def apply[Env, Err](routes: Routes[Env, Err]): Routes[Env, Err] =

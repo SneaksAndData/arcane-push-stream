@@ -69,15 +69,15 @@ object RequestLoggingSpec extends ZIOSpecDefault:
         val accessLog = lines.find(_.message == "Http request served")
         assertTrue(
           response.status == Status.Accepted,
-          accessLog.exists(_.annotations.get("http-path").contains(s"/$dataPath")),
-          accessLog.exists(_.annotations.get("http-method").contains("POST"))
+          accessLog.exists(_.annotations.get("url").contains(s"/$dataPath")),
+          accessLog.exists(_.annotations.get("method").contains("POST"))
         )
     },
     test("every line of a request names the endpoint, not just the access log line") {
       for (_, lines) <- serve(post(dataPath))
       yield assertTrue(
         lines.nonEmpty,
-        lines.forall(_.annotations.get("http-path").contains(s"/$dataPath"))
+        lines.forall(_.annotations.get("url").contains(s"/$dataPath"))
       )
     },
     test("a request that matched no route is still logged with the path that was tried") {
@@ -88,9 +88,23 @@ object RequestLoggingSpec extends ZIOSpecDefault:
         response.status == Status.NotFound,
         lines.exists(line =>
           line.message == "Http request served" &&
-            line.annotations.get("http-path").contains("/api/v1/unknown-producer/data")
+            line.annotations.get("url").contains("/api/v1/unknown-producer/data")
         )
       )
+    },
+    test("the endpoint is named once, not once per spelling") {
+      // `requestLogging` annotates its own access log line with `url`/`method`; using different keys here put both
+      // spellings of the same fact on that line
+      for (_, lines) <- serve(post(dataPath))
+      yield
+        val accessLog = lines.find(_.message == "Http request served")
+        assertTrue(
+          lines.count(_.message == "Http request served") == 1,
+          accessLog.exists(_.annotations.keySet.count(_.toLowerCase.contains("url")) == 1),
+          accessLog.exists(_.annotations.keySet.count(_.toLowerCase.contains("method")) == 1),
+          accessLog.exists(!_.annotations.contains("http-path")),
+          accessLog.exists(!_.annotations.contains("http-method"))
+        )
     },
     test("all lines of one request share a single correlation id") {
       // resolving the id per aspect rather than once per request used to mint a second uuid, splitting the handler's
