@@ -2,6 +2,9 @@
     <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>tmp/json-stream.log</file>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <!-- ZIO log annotations reach SLF4J as key-value pairs, not MDC entries; without this the
+                 endpoint and correlation id are missing from the JSON. -->
+            <includeKeyValuePairs>true</includeKeyValuePairs>
             <customFields>
                 {
                 "service":"arcane-stream-runner",
