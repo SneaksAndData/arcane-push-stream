@@ -22,6 +22,7 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 trait PersistenceService:
@@ -49,7 +50,8 @@ object PersistenceService:
       yield svc
     }
 
-final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extends PersistenceService:
+final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String, ttlAttribute: String, ttlDays: Int)
+    extends PersistenceService:
 
   def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
     for
@@ -75,8 +77,16 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String) extend
           Optional.Present(NumberAttributeValue(schemaRef.version.toString))
         )
       )
-      item = schemaRef.fingerprint.fold(baseItem) { fp =>
-        baseItem + (AttributeName("schemaFingerprint") -> AttributeValue(s =
+      // DynamoDB expires an item once its TTL attribute holds a Unix timestamp in SECONDS that is in the past.
+      // Note this is a different unit from `createdAt` above, which is milliseconds and unusable as a TTL.
+      itemWithTtl =
+        if ttlDays > 0 then
+          baseItem + (AttributeName(ttlAttribute) -> AttributeValue(n =
+            Optional.Present(NumberAttributeValue(now.plus(ttlDays, ChronoUnit.DAYS).getEpochSecond.toString))
+          ))
+        else baseItem
+      item = schemaRef.fingerprint.fold(itemWithTtl) { fp =>
+        itemWithTtl + (AttributeName("schemaFingerprint") -> AttributeValue(s =
           Optional.Present(StringAttributeValue(fp))
         ))
       }
@@ -115,7 +125,7 @@ object DynamoDBServiceLive:
         ZIO.succeed(_)
       )
 
-  private def createTable(dynamo: DynamoDb, tableName: String): IO[Throwable, Unit] =
+  private def createTable(dynamo: DynamoDb, cfg: PersistenceProvider.DynamoDB): IO[Throwable, Unit] =
     dynamo
       .createTable(
         CreateTableRequest(
@@ -128,7 +138,7 @@ object DynamoDBServiceLive:
               AttributeDefinition(KeySchemaAttributeName("timestampUTC"), ScalarAttributeType.S)
             )
           ),
-          tableName = TableArn(tableName),
+          tableName = TableArn(cfg.tableName),
           keySchema = Optional.Present(
             List(
               KeySchemaElement(KeySchemaAttributeName("producer"), KeyType.HASH),
@@ -139,7 +149,29 @@ object DynamoDBServiceLive:
         )
       )
       .mapError(_.toThrowable)
-      .unit *> ZIO.logInfo(s"Created DynamoDB table: $tableName")
+      .unit *> ZIO.logInfo(s"Created DynamoDB table: ${cfg.tableName}") *> enableTtl(dynamo, cfg)
+
+  /** Enable the TTL on a freshly auto-created table so local/dev tables behave like the Terraform-managed ones.
+    *
+    * CreateTable cannot configure a TTL, it always requires a follow-up UpdateTimeToLive call.
+    */
+  private def enableTtl(dynamo: DynamoDb, cfg: PersistenceProvider.DynamoDB): IO[Throwable, Unit] =
+    ZIO
+      .when(cfg.ttlDays > 0) {
+        dynamo
+          .updateTimeToLive(
+            UpdateTimeToLiveRequest(
+              tableName = TableArn(cfg.tableName),
+              timeToLiveSpecification = TimeToLiveSpecification(
+                enabled = TimeToLiveEnabled(true),
+                attributeName = TimeToLiveAttributeName(cfg.ttlAttribute)
+              )
+            )
+          )
+          .mapError(_.toThrowable)
+          .unit *> ZIO.logInfo(s"Enabled TTL on ${cfg.tableName} using attribute ${cfg.ttlAttribute}")
+      }
+      .unit
 
   /** if the Table doesn't exist and 'autoCreateTable = true', create the table, otherwise throw IllegalStateException
     */
@@ -148,7 +180,7 @@ object DynamoDBServiceLive:
       case true => ZIO.logInfo(s"DynamoDB table present: ${cfg.tableName}")
       case false if cfg.autoCreateTable =>
         ZIO.logInfo(s"DynamoDB table ${cfg.tableName} missing — creating (autoCreateTable=true)") *>
-          createTable(dynamo, cfg.tableName)
+          createTable(dynamo, cfg)
       case false =>
         ZIO.fail(
           new IllegalStateException(
@@ -184,12 +216,12 @@ object DynamoDBServiceLive:
         dynamo    <- ZIO.service[DynamoDb]
         readiness <- ZIO.service[ReadinessSignal]
         _ <- ZIO.logInfo(
-          s"Initialising DynamoDB client: region=${cfg.region} table=${cfg.tableName} endpoint=${cfg.endpoint.getOrElse("<aws-default>")}"
+          s"Initialising DynamoDB client: region=${cfg.region} table=${cfg.tableName} endpoint=${cfg.endpoint.getOrElse("<aws-default>")} ttlAttribute=${cfg.ttlAttribute} ttlDays=${cfg.ttlDays}"
         )
         _ <- ensureTable(dynamo, cfg)
         _ <- readiness.markReady
         _ <- ZIO.logInfo("Persistence ready — readiness signal set")
-      yield DynamoDBServiceLive(dynamo, cfg.tableName)
+      yield DynamoDBServiceLive(dynamo, cfg.tableName, cfg.ttlAttribute, cfg.ttlDays)
     }
 
   val live: ZLayer[PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =

@@ -31,13 +31,23 @@ sealed trait PersistenceProvider
 
 object PersistenceProvider:
 
-  /** DynamoDB-backed persistence used in production. */
+  /** DynamoDB-backed persistence used in production.
+    *
+    *   - `ttlAttribute`: item attribute carrying the DynamoDB TTL expiry. DynamoDB only ever deletes items whose TTL
+    *     attribute is a Number holding a Unix timestamp in *seconds*, so the value written by `enqueueToken` must not
+    *     be confused with the millisecond-precision `createdAt` attribute. Must match the `ttl.attribute_name` of the
+    *     Terraform-managed table.
+    *   - `ttlDays`: retention window applied to every token, expressed in days. `0` (or negative) disables TTL
+    *     stamping, leaving items to live forever.
+    */
   @name("dynamoDB")
   final case class DynamoDB(
       region: String = "us-east-1",
       tableName: String = "arcane-push-stream",
       endpoint: Option[String] = None,
-      autoCreateTable: Boolean = false
+      autoCreateTable: Boolean = false,
+      ttlAttribute: String = "expiresAt",
+      ttlDays: Int = 5
   ) extends PersistenceProvider
 
   /** In-memory persistence used for local dev and integration tests. Buffers records in a per-producer ZIO Queue.
