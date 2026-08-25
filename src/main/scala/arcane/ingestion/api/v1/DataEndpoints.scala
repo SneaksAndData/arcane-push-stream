@@ -267,9 +267,10 @@ object RouteLoader:
               .recordRequest(cfg.producerId, "error")
               .as(appErrorToResponse(maxContentLengthBytes)(err))
           }
+        // the endpoint, method, client IP and correlation id are annotated once per request by
+        // `LogAspect.annotateRequestContext` in Main, which also covers the access log line; only the producer
+        // span is route-specific and therefore applied here
           @@ LogAspect.logSpan(cfg.producerId)
-          @@ LogAspect.logAnnotateCorrelationId(req)
-          @@ LogAspect.logAnnotateRequestContext(req)
       }
 
 /* Service to watch kubernetes CRD resource and on change

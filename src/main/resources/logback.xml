@@ -1,7 +1,10 @@
 <configuration>
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d [%thread] %-5level  %logger{35} - %msg %mdc%n</pattern>
+            <!-- %kvp, not %mdc: zio-logging's SLF4J backend emits ZIO log annotations as SLF4J 2.0
+                 key-value pairs and never touches the MDC, so %mdc rendered nothing at all and every
+                 request line was printed without the endpoint, method or correlation id it carried. -->
+            <pattern>%d [%thread] %-5level  %logger{35} - %msg %kvp%n</pattern>
         </encoder>
     </appender>
 
