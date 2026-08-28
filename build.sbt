@@ -1,5 +1,7 @@
-val zioVersion     = "2.1.24"
-val zioHttpVersion = "3.11.2"
+val zioVersion       = "2.1.24"
+val zioHttpVersion   = "3.11.2"
+val zioJsonVersion   = "0.10.0"
+val zioSchemaVersion = "1.8.6"
 
 ThisBuild / dynverVTagPrefix := false
 ThisBuild / dynverSeparator  := "-"
@@ -79,15 +81,12 @@ lazy val root = project
       "dev.zio"             %% "zio-config-magnolia"      % "4.0.8",
       "dev.zio"             %% "zio-config-yaml"          % "4.0.8",
       "dev.zio"             %% "zio-http"                 % zioHttpVersion,
-      // zio-json is kept on 0.9.x: zio-schema-json (pulled in transitively) depends on
-      // 0.9.1, and zio-json follows early-semver, so 0.10.x is treated as binary
-      // incompatible and fails the eviction check. Bump this only together with a
-      // zio-schema release that targets zio-json 0.10.x.
-      "dev.zio" %% "zio-json"              % "0.10.0",
-      "dev.zio" %% "zio-schema"            % "1.8.6",
-      "dev.zio" %% "zio-schema-derivation" % "1.8.6",
-      "dev.zio" %% "zio-streams"           % zioVersion,
-      "dev.zio" %% "zio-dynamodb"          % "1.0.0-RC27",
+      "dev.zio"             %% "zio-json"                 % zioJsonVersion,
+      "dev.zio"             %% "zio-schema"               % zioSchemaVersion,
+      "dev.zio"             %% "zio-schema-json"          % zioSchemaVersion,
+      "dev.zio"             %% "zio-schema-derivation"    % zioSchemaVersion,
+      "dev.zio"             %% "zio-streams"              % zioVersion,
+      "dev.zio"             %% "zio-dynamodb"             % "1.0.0-RC26",
 
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
@@ -95,10 +94,10 @@ lazy val root = project
       "com.sneaksanddata" % "arcane-framework_3" % "2.3.2-1-g578d768",
 
       // Tests
-      "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
-      "dev.zio" %% "zio-schema-zio-test" % "1.8.6"        % Test,
-      "dev.zio" %% "zio-test"            % zioVersion     % Test,
-      "dev.zio" %% "zio-test-sbt"        % zioVersion     % Test
+      "dev.zio" %% "zio-http-testkit"    % zioHttpVersion   % Test,
+      "dev.zio" %% "zio-schema-zio-test" % zioSchemaVersion % Test,
+      "dev.zio" %% "zio-test"            % zioVersion       % Test,
+      "dev.zio" %% "zio-test-sbt"        % zioVersion       % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Force SnakeYAML 1.x for circe-yaml compatibility (see comment above on library deps).
