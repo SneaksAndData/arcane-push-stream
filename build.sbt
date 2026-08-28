@@ -26,7 +26,7 @@ lazy val root = project
     name             := "arcane-push-stream",
     organization     := "dev.zio",
     description      := "HTTP to ZIO streams web server",
-    scalaVersion     := "3.8.4",
+    scalaVersion     := "3.9.0",
     buildInfoPackage := "arcane.ingestion",
     buildInfoKeys := Seq[BuildInfoKey](
       name,
@@ -83,11 +83,11 @@ lazy val root = project
       // 0.9.1, and zio-json follows early-semver, so 0.10.x is treated as binary
       // incompatible and fails the eviction check. Bump this only together with a
       // zio-schema release that targets zio-json 0.10.x.
-      "dev.zio" %% "zio-json"              % "0.9.2",
+      "dev.zio" %% "zio-json"              % "0.10.0",
       "dev.zio" %% "zio-schema"            % "1.8.6",
       "dev.zio" %% "zio-schema-derivation" % "1.8.6",
       "dev.zio" %% "zio-streams"           % zioVersion,
-      "dev.zio" %% "zio-dynamodb"          % "1.0.0-RC26",
+      "dev.zio" %% "zio-dynamodb"          % "1.0.0-RC27",
 
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
