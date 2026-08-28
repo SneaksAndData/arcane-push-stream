@@ -92,7 +92,7 @@ lazy val root = project
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
       // identical to what the plugin will read/write.
-      "com.sneaksanddata" % "arcane-framework_3" % "2.2.1-111-gb5cafc5",
+      "com.sneaksanddata" % "arcane-framework_3" % "2.3.2-1-g578d768",
 
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
@@ -125,8 +125,8 @@ lazy val root = project
       // `SSL.getGroupName`, which only exists from tcnative 2.0.81 (the version netty-parent 4.2.17
       // pairs with). Older transitive pulls resolve 2.0.75, and every TLS handshake through the AWS
       // netty-nio-client then dies with a NoSuchMethodError at runtime, not at build time.
-      "io.netty" % "netty-tcnative-classes"             % "2.0.81.Final",
-      "io.netty" % "netty-tcnative-boringssl-static"    % "2.0.81.Final"
+      "io.netty" % "netty-tcnative-classes"          % "2.0.81.Final",
+      "io.netty" % "netty-tcnative-boringssl-static" % "2.0.81.Final"
     ),
     excludeDependencies += "io.netty" % "netty-codec",
     // Iceberg/SnowflakeJDBC (transitively via arcane-framework) pull the obsolete monolithic
