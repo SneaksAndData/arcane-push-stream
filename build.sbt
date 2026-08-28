@@ -92,7 +92,7 @@ lazy val root = project
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
       // identical to what the plugin will read/write.
-      "com.sneaksanddata" % "arcane-framework_3" % "2.3.2-90-g2592f52",
+      "com.sneaksanddata" % "arcane-framework_3" % "2.3.2-1-g578d768",
 
       // Tests
       "dev.zio" %% "zio-http-testkit"    % zioHttpVersion % Test,
