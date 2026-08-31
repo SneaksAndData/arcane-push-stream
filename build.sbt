@@ -69,7 +69,7 @@ lazy val root = project
       // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
       // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
       // whose SafeConstructor signature changed.
-      "org.yaml"                       % "snakeyaml"     % "2.6",
+      "org.yaml"                       % "snakeyaml"     % "2.7",
       "com.softwaremill.sttp.client3" %% "slf4j-backend" % "3.11.0",
       // Logback is the SLF4J binding: `Main` routes ZIO logs through SLF4J, and the appenders in
       // `src/main/resources/logback*.xml` are the app's only log sink. logstash-logback-encoder
@@ -86,7 +86,7 @@ lazy val root = project
       "dev.zio"             %% "zio-schema-json"          % zioSchemaVersion,
       "dev.zio"             %% "zio-schema-derivation"    % zioSchemaVersion,
       "dev.zio"             %% "zio-streams"              % zioVersion,
-      "dev.zio"             %% "zio-dynamodb"             % "1.0.0-RC26",
+      "dev.zio"             %% "zio-dynamodb"             % "1.0.0-RC27",
 
       // Iceberg catalog + entity-management primitives. Pinned to the same revision the
       // arcane-stream-pull plugin uses, so tables provisioned here are structurally
@@ -101,7 +101,7 @@ lazy val root = project
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
     // Force SnakeYAML 1.x for circe-yaml compatibility (see comment above on library deps).
-    dependencyOverrides += "org.yaml" % "snakeyaml" % "2.6",
+    dependencyOverrides += "org.yaml" % "snakeyaml" % "2.7",
     // Align Netty across zio-http (4.1.x) and AWS netty-nio-client (4.2.x).
     // In Netty 4.2 the monolithic `netty-codec` artifact was split into `netty-codec-base`
     // + `netty-codec-compression` (and others). If both 4.1 `netty-codec` and 4.2 `netty-codec-base`
@@ -124,8 +124,8 @@ lazy val root = project
       // `SSL.getGroupName`, which only exists from tcnative 2.0.81 (the version netty-parent 4.2.17
       // pairs with). Older transitive pulls resolve 2.0.75, and every TLS handshake through the AWS
       // netty-nio-client then dies with a NoSuchMethodError at runtime, not at build time.
-      "io.netty" % "netty-tcnative-classes"          % "2.0.81.Final",
-      "io.netty" % "netty-tcnative-boringssl-static" % "2.0.81.Final"
+      "io.netty" % "netty-tcnative-classes"          % "2.0.83.Final",
+      "io.netty" % "netty-tcnative-boringssl-static" % "2.0.83.Final"
     ),
     excludeDependencies += "io.netty" % "netty-codec",
     // Iceberg/SnowflakeJDBC (transitively via arcane-framework) pull the obsolete monolithic
