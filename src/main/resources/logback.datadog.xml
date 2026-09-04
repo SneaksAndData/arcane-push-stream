@@ -4,9 +4,6 @@
         <keepAliveDuration>20 seconds</keepAliveDuration>
         <encoder class="net.logstash.logback.encoder.LogstashEncoder">
             <includeMdc>true</includeMdc>
-            <!-- ZIO log annotations arrive as SLF4J key-value pairs rather than MDC entries, so this is what
-                 puts `url`, `method`, `client-ip` and `correlation-id` into the JSON sent to DataDog
-                 and makes a request filterable by endpoint there. -->
             <includeKeyValuePairs>true</includeKeyValuePairs>
             <customFields>
                 {
