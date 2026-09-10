@@ -1,6 +1,7 @@
 package arcane.ingestion.service
 
 import arcane.ingestion.api.v1.{IcebergColumnSpec, IcebergTableSpec}
+import arcane.ingestion.config.{AppConfig, PersistenceProvider}
 
 import com.sneaksanddata.arcane.framework.models.ddl.CreateTableRequest
 import com.sneaksanddata.arcane.framework.models.schemas.MergeKeyField
@@ -31,18 +32,24 @@ import scala.jdk.CollectionConverters.*
   *     `ARCANE_FRAMEWORK__CATALOG_NO_AUTH` is present).
   */
 trait IcebergProvisioner:
-  def provision(spec: IcebergTableSpec): Task[Unit]
+  /** Ensure the table described by `spec` exists.
+    *
+    * `producerId` is the route's identity in the token store: it is the value written to the DynamoDB index attribute
+    * for every pushed message, and it is published on the table so arcane-stream-pull knows which partition to poll.
+    */
+  def provision(spec: IcebergTableSpec, producerId: String): Task[Unit]
 
 object IcebergProvisioner:
-  val live: ULayer[IcebergProvisioner] = ZLayer.succeed(new IcebergProvisionerLive)
+  val live: ZLayer[AppConfig, Nothing, IcebergProvisioner] =
+    ZLayer.fromFunction(new IcebergProvisionerLive(_))
 
-  def provision(spec: IcebergTableSpec): RIO[IcebergProvisioner, Unit] =
-    ZIO.serviceWithZIO[IcebergProvisioner](_.provision(spec))
+  def provision(spec: IcebergTableSpec, producerId: String): RIO[IcebergProvisioner, Unit] =
+    ZIO.serviceWithZIO[IcebergProvisioner](_.provision(spec, producerId))
 
-final class IcebergProvisionerLive extends IcebergProvisioner:
+final class IcebergProvisionerLive(config: AppConfig) extends IcebergProvisioner:
   import IcebergProvisionerLive.*
 
-  override def provision(spec: IcebergTableSpec): Task[Unit] = ZIO.scoped {
+  override def provision(spec: IcebergTableSpec, producerId: String): Task[Unit] = ZIO.scoped {
     for
       settings <- ZIO.succeed(buildSettings(spec))
       factory  <- IcebergCatalogFactory.live(settings)
@@ -55,7 +62,7 @@ final class IcebergProvisionerLive extends IcebergProvisioner:
       )
       _ <- ZIO.unless(exists)(
         manager.createTable(CreateTableRequest(spec.tableName, schema, replace = false, properties = properties)) *>
-          applyInitialProperties(factory, settings, spec) *>
+          applyInitialProperties(factory, settings, spec, producerId) *>
           ZIO.logInfo(
             s"[IcebergProvisioner] created table ${spec.namespace}.${spec.tableName} " +
               s"(${resolveColumns(spec).size} columns${
@@ -73,9 +80,10 @@ final class IcebergProvisionerLive extends IcebergProvisioner:
   private def applyInitialProperties(
       factory: IcebergCatalogFactory,
       settings: IcebergCatalogSettings,
-      spec: IcebergTableSpec
+      spec: IcebergTableSpec,
+      producerId: String
   ): Task[Unit] =
-    val properties = initialProperties(spec)
+    val properties = initialProperties(spec, producerId, config.persistence)
     for
       catalog <- factory.getCatalog
       tableId = org.apache.iceberg.catalog.TableIdentifier.of(settings.namespace, spec.tableName)
@@ -182,17 +190,55 @@ object IcebergProvisionerLive:
   val EpochWatermarkComment = """{"timestamp":"1970-01-01T00:00:00Z"}"""
 
   /** Properties seeded on the table right after creation: whatever the route declared, with the watermark comment
-    * filled in when it left one out, plus the route's pointer. A comment the route does declare is honoured as-is, so a
-    * route that wants to start from a later point keeps control of it.
+    * filled in when it left one out, plus the plugin properties from [[pluginProperties]]. A comment the route does
+    * declare is honoured as-is, so a route that wants to start from a later point keeps control of it.
+    *
+    * Route-declared properties are written verbatim — they belong to the table, not to this plugin — and so is
+    * `comment`, which arcane-stream-pull reads under its Iceberg-standard name.
     */
-  private[service] def initialProperties(spec: IcebergTableSpec): Map[String, String] =
+  private[service] def initialProperties(
+      spec: IcebergTableSpec,
+      producerId: String,
+      persistence: PersistenceProvider
+  ): Map[String, String] =
     val declared =
       if spec.initialProperties.contains(CommentProperty) then spec.initialProperties
       else spec.initialProperties + (CommentProperty -> EpochWatermarkComment)
 
-    spec.jsonExpressionPointer.filter(_.trim.nonEmpty) match
-      case Some(pointer) => declared + (JsonPointerProperty -> pointer)
-      case None          => declared
+    declared ++ pluginProperties(spec, producerId, persistence)
+
+  /** Everything arcane-stream-pull needs to find and decode this table's source records, published under
+    * [[PushStreamPropertyPrefix]] so it cannot collide with Iceberg's own properties or with anything the route
+    * declares itself.
+    *
+    * The token store coordinates are taken from this service's own persistence configuration, which is what actually
+    * wrote the records, so a table can never advertise a store it is not fed from. An in-memory backend has no
+    * coordinates to publish (it is dev-only and nothing can pull from it), so only the pointer is written.
+    */
+  private[service] def pluginProperties(
+      spec: IcebergTableSpec,
+      producerId: String,
+      persistence: PersistenceProvider
+  ): Map[String, String] =
+    val pointer = spec.jsonExpressionPointer.filter(_.trim.nonEmpty).map(JsonPointerProperty -> _).toMap
+
+    val tokenStore = persistence match
+      case dynamo: PersistenceProvider.DynamoDB =>
+        Map(
+          PullIndexKeyProperty      -> dynamo.pullIndexKey,
+          PullIndexValueProperty    -> producerId,
+          VersionFieldNameProperty  -> dynamo.versionFieldName,
+          DynamoDbRegionProperty    -> dynamo.region,
+          DynamoDbTableNameProperty -> dynamo.tableName
+        ) ++ dynamo.endpoint.filter(_.trim.nonEmpty).map(DynamoDbEndpointProperty -> _)
+      case _: PersistenceProvider.InMemory => Map.empty
+
+    tokenStore ++ pointer
+
+  /** Namespace for every table property this service owns. Properties the route declares (and `comment`, which is
+    * Iceberg's own) are left unprefixed; only the ones arcane-stream-pull reads back from us carry it.
+    */
+  val PushStreamPropertyPrefix = "arcane.plugin.push-stream."
 
   /** Table property carrying the route's `jsonExpressionPointer` to the consumer.
     *
@@ -203,7 +249,23 @@ object IcebergProvisionerLive:
     * Like every entry in [[initialProperties]] it is written at creation time only, so changing a route's pointer on an
     * existing table needs the property to be updated by hand.
     */
-  val JsonPointerProperty = "json-pointer-expression"
+  val JsonPointerProperty = PushStreamPropertyPrefix + "json-pointer-expression"
+
+  /** Token-store attribute partitioning records by producer, and the value identifying this route's partition within it
+    * — together they are the `pullIndexKey = pullIndexValue` predicate the consumer polls with.
+    */
+  val PullIndexKeyProperty   = PushStreamPropertyPrefix + "pull-index-key"
+  val PullIndexValueProperty = PushStreamPropertyPrefix + "pull-index-value"
+
+  /** Token-store attribute holding the ingestion timestamp the consumer advances its watermark over. */
+  val VersionFieldNameProperty = PushStreamPropertyPrefix + "version-field-name"
+
+  /** Coordinates of the DynamoDB table holding the tokens for this route. The endpoint is only published when one is
+    * configured (dynamodb-local); against real AWS the region alone resolves it.
+    */
+  val DynamoDbRegionProperty    = PushStreamPropertyPrefix + "dynamodb-region"
+  val DynamoDbTableNameProperty = PushStreamPropertyPrefix + "dynamodb-table-name"
+  val DynamoDbEndpointProperty  = PushStreamPropertyPrefix + "dynamodb-endpoint"
 
   /** Column receiving the payload's own `id`, used only by routes without a pointer. It is renamed so it cannot be
     * confused with the envelope `id`, which identifies the pushed message and lands in [[MergeKeyColumn]] instead.

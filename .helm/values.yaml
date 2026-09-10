@@ -184,6 +184,12 @@ settings:
     dynamoDB:
       region: "us-east-1"
       tableName: "arcane-push-stream-tokens"
+      # Key schema attribute names. Rarely changed — they must match the key schema of the
+      # Terraform-managed table, and are published on every provisioned Iceberg table (prefixed
+      # with `arcane.plugin.push-stream.`) so arcane-stream-pull polls by the same names.
+      # Leave empty to use the defaults below.
+      pullIndexKey: "producer"
+      versionFieldName: "timestampUTC"
       # Optional endpoint override (e.g. dynamodb-local for tests). Leave empty to use real AWS.
       endpoint: ""
       # Whether to create the table on startup if missing. Recommended false in production.
