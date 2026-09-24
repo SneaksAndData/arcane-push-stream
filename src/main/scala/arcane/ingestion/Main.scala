@@ -85,12 +85,23 @@ object Main extends ZIOAppDefault {
         RequestServiceLive.live,
         PersistenceService.live,
         IcebergProvisioner.live,
-        // Observability: tag provider is always installed (metrics register in-memory even when
-        // no publisher is wired); the DataDog publisher is a conditional no-op controlled by
-        // `observability.datadog.enabled`.
         ObservabilityLayers.tagProviderLayer,
         IngestionMetrics.layer,
         ObservabilityLayers.publisherLayer
       )
-      .tapError(err => zlog(s"Fatal startup error: ${err.getMessage}"))
+      // Startup builds the layers in parallel, so the first failure interrupts its siblings and ZIO
+      // would otherwise dump a fiber trace for every one of them — burying the actual cause. Report
+      // just that cause and exit non-zero; the full trace stays available at DEBUG.
+      .foldCauseZIO(
+        cause =>
+          cause.failureOption.orElse(cause.defects.headOption) match
+            case Some(error) =>
+              val message = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.toString)
+              ZIO.logError(s"Startup failed: $message") *>
+                ZIO.logDebugCause("Full startup cause", cause) *>
+                exit(ExitCode.failure)
+            // interruption-only: a sibling already reported the real failure
+            case None => ZIO.unit,
+        _ => ZIO.unit
+      )
 }

@@ -65,7 +65,8 @@ spec:
                     The request body is stored whole — the pointer is applied by the consumer, not
                     at ingestion — so a route whose pointer changes can be re-streamed from the
                     records already persisted. It is published on the target table as the
-                    `json-pointer-expression` property, which is where arcane-stream-pull reads it
+                    `arcane.plugin.push-stream.json-pointer-expression` property, which is where
+                    arcane-stream-pull reads it
                     from, since the PullStream CRD has no field to configure it with.
                     The pointed-at node's top-level fields are "hoisted" into one iceberg column
                     each: scalars keep their own type, while a nested record, map or array becomes
@@ -175,6 +176,10 @@ spec:
                         table from the beginning rather than fail. Note there is no
                         `watermark:` prefix -- the comment is the JSON document itself.
                         Set `comment` explicitly to start from a later point.
+                        Alongside these, the provisioner seeds its own properties under the
+                        `arcane.plugin.push-stream.` prefix (json pointer and the token store
+                        coordinates arcane-stream-pull polls with); keys declared here are
+                        never prefixed and take no part in that.
                       additionalProperties:
                         type: string
       additionalPrinterColumns:

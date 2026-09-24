@@ -27,6 +27,12 @@ data:
     persistence:
       type: {{ .Values.settings.persistence.type | quote }}
       {{- if eq .Values.settings.persistence.type "dynamoDB" }}
+      {{- with .Values.settings.persistence.dynamoDB.pullIndexKey }}
+      pullIndexKey: {{ . | quote }}
+      {{- end }}
+      {{- with .Values.settings.persistence.dynamoDB.versionFieldName }}
+      versionFieldName: {{ . | quote }}
+      {{- end }}
       region: {{ .Values.settings.persistence.dynamoDB.region | quote }}
       tableName: {{ .Values.settings.persistence.dynamoDB.tableName | quote }}
       {{- if .Values.settings.persistence.dynamoDB.endpoint }}

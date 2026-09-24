@@ -33,15 +33,26 @@ object PersistenceProvider:
 
   /** DynamoDB-backed persistence used in production.
     *
+    *   - `pullIndexKey`: item attribute holding the producer identity, used as the table HASH key and as the partition
+    *     arcane-stream-pull polls by. Only needs changing for a table whose key was provisioned under another name; it
+    *     is published on every provisioned Iceberg table so the consumer picks it up without extra configuration.
+    *   - `versionFieldName`: item attribute holding the ISO-8601 ingestion timestamp, used as the table RANGE key and
+    *     as the watermark arcane-stream-pull advances. Same caveat as `pullIndexKey`: rarely changed, and published on
+    *     the provisioned table.
     *   - `ttlAttribute`: item attribute carrying the DynamoDB TTL expiry. DynamoDB only ever deletes items whose TTL
     *     attribute is a Number holding a Unix timestamp in *seconds*, so the value written by `enqueueToken` must not
     *     be confused with the millisecond-precision `createdAt` attribute. Must match the `ttl.attribute_name` of the
     *     Terraform-managed table.
     *   - `ttlDays`: retention window applied to every token, expressed in days. `0` (or negative) disables TTL
     *     stamping, leaving items to live forever.
+    *
+    * Changing `pullIndexKey` or `versionFieldName` renames the key schema, so an existing table cannot follow: point
+    * the new names at a new table (or one provisioned with them) instead.
     */
   @name("dynamoDB")
   final case class DynamoDB(
+      pullIndexKey: String = "producer",
+      versionFieldName: String = "timestampUTC",
       region: String = "us-east-1",
       tableName: String = "arcane-push-stream",
       endpoint: Option[String] = None,

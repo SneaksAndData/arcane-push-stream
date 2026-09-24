@@ -66,9 +66,8 @@ lazy val root = project
     libraryDependencies ++= Seq(
       "com.coralogix"  %% "zio-k8s-client" % "3.2.1",
       "org.apache.avro" % "avro"           % "1.12.2",
-      // Pin SnakeYAML to 1.x so circe-yaml (used by zio-k8s-client to read kubeconfig) keeps working.
-      // Several transitive deps (json-schema-validator historically, others) pull SnakeYAML 2.x,
-      // whose SafeConstructor signature changed.
+      // SnakeYAML 2.x is required (1.x carries CVE-2022-1471 in its constructor). See the
+      // circe-yaml override below: zio-k8s-client's default circe-yaml predates the 2.x API.
       "org.yaml"                       % "snakeyaml"     % "2.6",
       "com.softwaremill.sttp.client3" %% "slf4j-backend" % "3.11.0",
       // Logback is the SLF4J binding: `Main` routes ZIO logs through SLF4J, and the appenders in
@@ -100,8 +99,15 @@ lazy val root = project
       "dev.zio" %% "zio-test-sbt"        % zioVersion       % Test
     ),
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
-    // Force SnakeYAML 1.x for circe-yaml compatibility (see comment above on library deps).
-    dependencyOverrides += "org.yaml" % "snakeyaml" % "2.6",
+    // SnakeYAML 2.x drops the no-arg `SafeConstructor()` that circe-yaml 0.14.x calls, so the
+    // combination throws `NoSuchMethodError` the moment zio-k8s-client parses a kubeconfig —
+    // i.e. on every startup outside a cluster. zio-k8s-client 3.2.1 pulls circe-yaml 0.14.2
+    // transitively, so pin both halves: SnakeYAML 2.x (1.x is CVE-2022-1471) and the first
+    // circe-yaml line built against it.
+    dependencyOverrides ++= Seq(
+      "org.yaml"  % "snakeyaml"     % "2.6",
+      "io.circe" %% "circe-yaml"    % "0.15.3"
+    ),
     // Align Netty across zio-http (4.1.x) and AWS netty-nio-client (4.2.x).
     // In Netty 4.2 the monolithic `netty-codec` artifact was split into `netty-codec-base`
     // + `netty-codec-compression` (and others). If both 4.1 `netty-codec` and 4.2 `netty-codec-base`

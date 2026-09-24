@@ -1,27 +1,60 @@
+# The single example DataRoute, used for local runs, kind deployments and demos.
+#
+#   kubectl apply -f deploy/examples/dataroutes.yaml
+#   kubectl port-forward svc/arcane-push-stream 8085:8085
+#   ./deploy/send-test-data.sh
+#
+# The schema is deliberately mixed so one route covers both column mappings the
+# provisioner can produce:
+#   - root scalars (id, timestampUTC, source) become typed Iceberg columns. `id` is
+#     provisioned as `push_event_id`, since the envelope's own `id` is the merge key.
+#   - `payload` is a record, so it becomes a single VARIANT column: its shape is only
+#     known once a message arrives. The map nested inside it stays within that variant,
+#     which is what makes this route useful for checking variant behaviour end to end.
+# A variant column pins the table to Iceberg format-version 3; the provisioner sets that
+# at creation time.
+#
+# The in-cluster lakekeeper catalog deployed by `just catalog-up` backs `spec.iceberg`
+# below. Provisioning happens *before* the rebuilt route table is published, so a catalog
+# that cannot be reached leaves every /api/v2/producer1/data request answering 404 while
+# the connection attempt hangs — comment the block out if you run without one.
 apiVersion: pushstream.sneaksanddata.com/v1alpha1
 kind: DataRoute
 metadata:
-  name: consumer1
+  name: producer1
 spec:
-  consumerId: consumer1
-  schemaSubject: consumer1-raw
+  consumerId: producer1
+  schemaSubject: producer1-event
   schemaVersion: 1
----
-apiVersion: pushstream.sneaksanddata.com/v1alpha1
-kind: DataRoute
-metadata:
-  name: consumer2
-spec:
-  consumerId: consumer2
-  schemaSubject: consumer2-event
-  schemaVersion: 1
+  iceberg:
+    catalogUri: http://lakekeeper.default.svc.cluster.local:18181/catalog
+    warehouse: demo
+    namespace: arcane_pull_test
+    tableName: events
   payloadSchema: |
     {
       "type": "record",
-      "name": "Consumer2Event",
+      "name": "Producer1Event",
       "namespace": "com.sneaksanddata.pushstream",
       "fields": [
-        { "name": "id",      "type": "string" },
-        { "name": "payload", "type": { "type": "map", "values": "string" } }
+        { "name": "id",           "type": "string" },
+        { "name": "timestampUTC", "type": "string" },
+        { "name": "source",       "type": "string" },
+        {
+          "name": "payload",
+          "type": {
+            "type": "record",
+            "name": "Producer1Payload",
+            "namespace": "com.sneaksanddata.pushstream",
+            "fields": [
+              { "name": "eventType",  "type": "string" },
+              { "name": "sequence",   "type": "int" },
+              { "name": "durationMs", "type": "long" },
+              { "name": "score",      "type": "double" },
+              { "name": "isRetry",    "type": "boolean" },
+              { "name": "attributes", "type": { "type": "map", "values": "string" } }
+            ]
+          }
+        }
       ]
     }
