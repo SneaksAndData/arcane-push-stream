@@ -13,6 +13,7 @@ import arcane.ingestion.Models.*
 import arcane.ingestion.common.LogAspect
 import arcane.ingestion.config.AppConfig
 import arcane.ingestion.observability.IngestionMetrics
+
 final case class EndpointConfig(
     producerId: String,
     schemaSubject: String,
@@ -323,7 +324,7 @@ object DynamicRoutingApp:
             _ <- ZIO
               .unless(alreadySeen) {
                 provisioner
-                  .provision(spec, cfg.producerId)
+                  .provision(spec)
                   .tapError(e =>
                     ZIO.logWarningCause(
                       s"[DynamicRoutingApp] iceberg provisioning failed for ${cfg.producerId}: ${e.getMessage}",

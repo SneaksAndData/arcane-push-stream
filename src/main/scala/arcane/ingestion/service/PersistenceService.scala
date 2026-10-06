@@ -50,32 +50,25 @@ object PersistenceService:
       yield svc
     }
 
-/** DynamoDB token writer.
-  *
-  * The index and version attribute names come from [[PersistenceProvider.DynamoDB]] rather than being hard-coded, so an
-  * item is always written under the same key schema the table was provisioned with and the same names published on the
-  * Iceberg table by [[IcebergProvisionerLive.pluginProperties]].
-  */
-final case class DynamoDBServiceLive(dynamo: DynamoDb, config: PersistenceProvider.DynamoDB) extends PersistenceService:
+final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String, ttlAttribute: String, ttlDays: Int)
+    extends PersistenceService:
 
   def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
     for
       id  <- ZIO.succeed(UUID.randomUUID().toString)
       now <- Clock.instant
-      // the version attribute is a lexicographically-ordered ISO-8601 offset datetime (always UTC) used as the
-      // table RANGE key. The downstream arcane-stream-pull plugin polls by
-      // `<pullIndexKey> = X AND <versionFieldName> > $lastSeen`, so ordering must match chronological order.
+      // timestampUTC is a lexicographically-ordered ISO-8601 offset datetime (always UTC) used as the table RANGE key.
+      // The downstream arcane-stream-pull plugin polls by `producer = X AND timestampUTC > $lastSeen`,
+      // so ordering must match chronological order.
       timestampUTC = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).toString
       // The plugin expects `payload` to be a UTF-8 JSON string (either a single object or an array of objects),
       // not Avro-binary. Callers therefore must POST JSON; we just transcode the bytes verbatim.
       payloadJson = new String(payload, StandardCharsets.UTF_8)
       baseItem = Map(
-        AttributeName(config.pullIndexKey) -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
-        AttributeName(config.versionFieldName) -> AttributeValue(s =
-          Optional.Present(StringAttributeValue(timestampUTC))
-        ),
-        AttributeName("id")      -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
-        AttributeName("payload") -> AttributeValue(s = Optional.Present(StringAttributeValue(payloadJson))),
+        AttributeName("producer")     -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
+        AttributeName("timestampUTC") -> AttributeValue(s = Optional.Present(StringAttributeValue(timestampUTC))),
+        AttributeName("id")           -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
+        AttributeName("payload")      -> AttributeValue(s = Optional.Present(StringAttributeValue(payloadJson))),
         AttributeName("createdAt") -> AttributeValue(n =
           Optional.Present(NumberAttributeValue(now.toEpochMilli.toString))
         ),
@@ -87,9 +80,9 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, config: PersistenceProvid
       // DynamoDB expires an item once its TTL attribute holds a Unix timestamp in SECONDS that is in the past.
       // Note this is a different unit from `createdAt` above, which is milliseconds and unusable as a TTL.
       itemWithTtl =
-        if config.ttlDays > 0 then
-          baseItem + (AttributeName(config.ttlAttribute) -> AttributeValue(n =
-            Optional.Present(NumberAttributeValue(now.plus(config.ttlDays, ChronoUnit.DAYS).getEpochSecond.toString))
+        if ttlDays > 0 then
+          baseItem + (AttributeName(ttlAttribute) -> AttributeValue(n =
+            Optional.Present(NumberAttributeValue(now.plus(ttlDays, ChronoUnit.DAYS).getEpochSecond.toString))
           ))
         else baseItem
       item = schemaRef.fingerprint.fold(itemWithTtl) { fp =>
@@ -98,7 +91,7 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, config: PersistenceProvid
         ))
       }
       _ <- dynamo
-        .putItem(PutItemRequest(tableName = TableArn(config.tableName), item = item))
+        .putItem(PutItemRequest(tableName = TableArn(tableName), item = item))
         .mapError(_.toThrowable)
         .tapErrorCause(c => ZIO.logErrorCause(s"DynamoDB putItem failed for producer=$producer id=$id", c))
     yield true
@@ -139,18 +132,17 @@ object DynamoDBServiceLive:
           attributeDefinitions = Optional.Present(
             List(
               // HASH key: producer identity (caller-provided)
-              AttributeDefinition(KeySchemaAttributeName(cfg.pullIndexKey), ScalarAttributeType.S),
+              AttributeDefinition(KeySchemaAttributeName("producer"), ScalarAttributeType.S),
               // RANGE key: ISO-8601 UTC timestamp string. Lexicographic order matches chronological order,
-              // so the arcane-stream-pull plugin can poll with
-              // `<pullIndexKey> = X AND <versionFieldName> > $lastSeen`.
-              AttributeDefinition(KeySchemaAttributeName(cfg.versionFieldName), ScalarAttributeType.S)
+              // so the arcane-stream-pull plugin can poll with `producer = X AND timestampUTC > $lastSeen`.
+              AttributeDefinition(KeySchemaAttributeName("timestampUTC"), ScalarAttributeType.S)
             )
           ),
           tableName = TableArn(cfg.tableName),
           keySchema = Optional.Present(
             List(
-              KeySchemaElement(KeySchemaAttributeName(cfg.pullIndexKey), KeyType.HASH),
-              KeySchemaElement(KeySchemaAttributeName(cfg.versionFieldName), KeyType.RANGE)
+              KeySchemaElement(KeySchemaAttributeName("producer"), KeyType.HASH),
+              KeySchemaElement(KeySchemaAttributeName("timestampUTC"), KeyType.RANGE)
             )
           ),
           billingMode = Optional.Present(BillingMode.PAY_PER_REQUEST)
@@ -224,13 +216,12 @@ object DynamoDBServiceLive:
         dynamo    <- ZIO.service[DynamoDb]
         readiness <- ZIO.service[ReadinessSignal]
         _ <- ZIO.logInfo(
-          s"Initialising DynamoDB client: region=${cfg.region} table=${cfg.tableName} endpoint=${cfg.endpoint.getOrElse("<aws-default>")} " +
-            s"pullIndexKey=${cfg.pullIndexKey} versionFieldName=${cfg.versionFieldName} ttlAttribute=${cfg.ttlAttribute} ttlDays=${cfg.ttlDays}"
+          s"Initialising DynamoDB client: region=${cfg.region} table=${cfg.tableName} endpoint=${cfg.endpoint.getOrElse("<aws-default>")} ttlAttribute=${cfg.ttlAttribute} ttlDays=${cfg.ttlDays}"
         )
         _ <- ensureTable(dynamo, cfg)
         _ <- readiness.markReady
         _ <- ZIO.logInfo("Persistence ready — readiness signal set")
-      yield DynamoDBServiceLive(dynamo, cfg)
+      yield DynamoDBServiceLive(dynamo, cfg.tableName, cfg.ttlAttribute, cfg.ttlDays)
     }
 
   val live: ZLayer[PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =
