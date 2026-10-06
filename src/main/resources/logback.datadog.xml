@@ -14,7 +14,9 @@
                 "ddsource":"java",
                 "env":"${ENVIRONMENT:-unknown}",
                 "version":"${APPLICATION_VERSION:-unknown}",
-                "host":"${HOSTNAME}"
+                "host":"${HOSTNAME}",
+                "kube_cluster_name":"${KUBE_CLUSTER_NAME:-unknown}",
+                "pod_name":"${POD_NAME:-unknown}"
                 }
             </customFields>
             <prefix class="ch.qos.logback.core.encoder.LayoutWrappingEncoder">

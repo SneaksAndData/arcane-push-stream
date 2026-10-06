@@ -241,3 +241,7 @@ settings:
 
 # Namespace whose DataRoute CRs this instance should watch. If empty, watches all namespaces.
 resourceNamespace: ""
+
+# Name of the EKS cluster the app runs in. Set as KUBE_CLUSTER_NAME so direct-to-intake
+# Datadog logs carry the kube_cluster_name tag (otherwise only provided by the Agent).
+clusterName: ""
