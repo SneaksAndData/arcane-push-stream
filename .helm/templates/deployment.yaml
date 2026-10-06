@@ -82,6 +82,13 @@ spec:
             - name: RESOURCE_NAMESPACE
               value: {{ .Values.resourceNamespace | quote }}
             {{- end }}
+            # Standard Datadog Kubernetes log tag. The direct-to-intake TCP appender bypasses
+            # the Agent (which would normally attach this automatically), so it must be
+            # supplied explicitly for the logs to carry the kube_cluster_name facet.
+            {{- if .Values.clusterName }}
+            - name: KUBE_CLUSTER_NAME
+              value: {{ .Values.clusterName | quote }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
