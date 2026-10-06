@@ -82,13 +82,9 @@ spec:
             - name: RESOURCE_NAMESPACE
               value: {{ .Values.resourceNamespace | quote }}
             {{- end }}
-            # Standard Datadog Kubernetes log tags. The direct-to-intake TCP appender bypasses
-            # the Agent (which would normally attach these automatically), so they must be
-            # supplied explicitly for the logs to carry kube_cluster_name/pod_name facets.
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
+            # Standard Datadog Kubernetes log tag. The direct-to-intake TCP appender bypasses
+            # the Agent (which would normally attach this automatically), so it must be
+            # supplied explicitly for the logs to carry the kube_cluster_name facet.
             {{- if .Values.clusterName }}
             - name: KUBE_CLUSTER_NAME
               value: {{ .Values.clusterName | quote }}
