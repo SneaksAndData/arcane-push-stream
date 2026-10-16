@@ -2,8 +2,8 @@
 # Usage:
 #   helm install arcane-push-stream .helm -f .helm/values.yaml -f .helm/values-dev.yaml
 #
-# The in-cluster `dynamodb-local` Service is deployed from deploy/k8s/dynamodb-local.yaml
-# by the `just up` / `just docker-up` / `just data-up` recipes.
+# The in-cluster dynamodb-local and lakekeeper Services are deployed from deploy/k8s/
+# by the `just up` / `just docker-up` / `just data-up` / `just catalog-up` recipes.
 
 environment: "Development"
 
@@ -32,6 +32,10 @@ settings:
 extraEnv:
   - name: JAVA_TOOL_OPTIONS
     value: "-Dlogback.configurationFile=/etc/arcane-push-stream/logback.json.xml"
+  # The in-cluster lakekeeper (deploy/k8s/lakekeeper.yaml) runs without OIDC, so
+  # skip the OAuth2 catalog properties entirely.
+  - name: ARCANE_FRAMEWORK__CATALOG_NO_AUTH
+    value: "true"
   - name: AWS_ACCESS_KEY_ID
     value: "minioadmin"
   - name: AWS_SECRET_ACCESS_KEY

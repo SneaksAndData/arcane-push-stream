@@ -50,25 +50,32 @@ object PersistenceService:
       yield svc
     }
 
-final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String, ttlAttribute: String, ttlDays: Int)
-    extends PersistenceService:
+/** DynamoDB token writer.
+  *
+  * The index and version attribute names come from [[PersistenceProvider.DynamoDB]] rather than being hard-coded, so an
+  * item is always written under the same key schema the table was provisioned with and the same names published on the
+  * Iceberg table by [[IcebergProvisionerLive.pluginProperties]].
+  */
+final case class DynamoDBServiceLive(dynamo: DynamoDb, config: PersistenceProvider.DynamoDB) extends PersistenceService:
 
   def enqueueToken(payload: Array[Byte], producer: String, schemaRef: SchemaRef): IO[Throwable, Boolean] =
     for
       id  <- ZIO.succeed(UUID.randomUUID().toString)
       now <- Clock.instant
-      // timestampUTC is a lexicographically-ordered ISO-8601 offset datetime (always UTC) used as the table RANGE key.
-      // The downstream arcane-stream-pull plugin polls by `producer = X AND timestampUTC > $lastSeen`,
-      // so ordering must match chronological order.
+      // the version attribute is a lexicographically-ordered ISO-8601 offset datetime (always UTC) used as the
+      // table RANGE key. The downstream arcane-stream-pull plugin polls by
+      // `<pullIndexKey> = X AND <versionFieldName> > $lastSeen`, so ordering must match chronological order.
       timestampUTC = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).toString
       // The plugin expects `payload` to be a UTF-8 JSON string (either a single object or an array of objects),
       // not Avro-binary. Callers therefore must POST JSON; we just transcode the bytes verbatim.
       payloadJson = new String(payload, StandardCharsets.UTF_8)
       baseItem = Map(
-        AttributeName("producer")     -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
-        AttributeName("timestampUTC") -> AttributeValue(s = Optional.Present(StringAttributeValue(timestampUTC))),
-        AttributeName("id")           -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
-        AttributeName("payload")      -> AttributeValue(s = Optional.Present(StringAttributeValue(payloadJson))),
+        AttributeName(config.pullIndexKey) -> AttributeValue(s = Optional.Present(StringAttributeValue(producer))),
+        AttributeName(config.versionFieldName) -> AttributeValue(s =
+          Optional.Present(StringAttributeValue(timestampUTC))
+        ),
+        AttributeName("id")      -> AttributeValue(s = Optional.Present(StringAttributeValue(id))),
+        AttributeName("payload") -> AttributeValue(s = Optional.Present(StringAttributeValue(payloadJson))),
         AttributeName("createdAt") -> AttributeValue(n =
           Optional.Present(NumberAttributeValue(now.toEpochMilli.toString))
         ),
@@ -80,9 +87,9 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String, ttlAtt
       // DynamoDB expires an item once its TTL attribute holds a Unix timestamp in SECONDS that is in the past.
       // Note this is a different unit from `createdAt` above, which is milliseconds and unusable as a TTL.
       itemWithTtl =
-        if ttlDays > 0 then
-          baseItem + (AttributeName(ttlAttribute) -> AttributeValue(n =
-            Optional.Present(NumberAttributeValue(now.plus(ttlDays, ChronoUnit.DAYS).getEpochSecond.toString))
+        if config.ttlDays > 0 then
+          baseItem + (AttributeName(config.ttlAttribute) -> AttributeValue(n =
+            Optional.Present(NumberAttributeValue(now.plus(config.ttlDays, ChronoUnit.DAYS).getEpochSecond.toString))
           ))
         else baseItem
       item = schemaRef.fingerprint.fold(itemWithTtl) { fp =>
@@ -91,7 +98,7 @@ final case class DynamoDBServiceLive(dynamo: DynamoDb, tableName: String, ttlAtt
         ))
       }
       _ <- dynamo
-        .putItem(PutItemRequest(tableName = TableArn(tableName), item = item))
+        .putItem(PutItemRequest(tableName = TableArn(config.tableName), item = item))
         .mapError(_.toThrowable)
         .tapErrorCause(c => ZIO.logErrorCause(s"DynamoDB putItem failed for producer=$producer id=$id", c))
     yield true
@@ -132,17 +139,18 @@ object DynamoDBServiceLive:
           attributeDefinitions = Optional.Present(
             List(
               // HASH key: producer identity (caller-provided)
-              AttributeDefinition(KeySchemaAttributeName("producer"), ScalarAttributeType.S),
+              AttributeDefinition(KeySchemaAttributeName(cfg.pullIndexKey), ScalarAttributeType.S),
               // RANGE key: ISO-8601 UTC timestamp string. Lexicographic order matches chronological order,
-              // so the arcane-stream-pull plugin can poll with `producer = X AND timestampUTC > $lastSeen`.
-              AttributeDefinition(KeySchemaAttributeName("timestampUTC"), ScalarAttributeType.S)
+              // so the arcane-stream-pull plugin can poll with
+              // `<pullIndexKey> = X AND <versionFieldName> > $lastSeen`.
+              AttributeDefinition(KeySchemaAttributeName(cfg.versionFieldName), ScalarAttributeType.S)
             )
           ),
           tableName = TableArn(cfg.tableName),
           keySchema = Optional.Present(
             List(
-              KeySchemaElement(KeySchemaAttributeName("producer"), KeyType.HASH),
-              KeySchemaElement(KeySchemaAttributeName("timestampUTC"), KeyType.RANGE)
+              KeySchemaElement(KeySchemaAttributeName(cfg.pullIndexKey), KeyType.HASH),
+              KeySchemaElement(KeySchemaAttributeName(cfg.versionFieldName), KeyType.RANGE)
             )
           ),
           billingMode = Optional.Present(BillingMode.PAY_PER_REQUEST)
@@ -202,7 +210,8 @@ object DynamoDBServiceLive:
       .refineOrDie {
         case sdk: SdkClientException =>
           new IllegalStateException(
-            s"DynamoDB endpoint ${cfg.endpoint.getOrElse("<aws-default>")} is unreachable: ${sdk.getMessage}",
+            s"DynamoDB at ${cfg.endpoint.getOrElse("<aws-default>")} is unreachable " +
+              s"(region=${cfg.region}, table=${cfg.tableName}): ${sdk.getMessage}",
             sdk
           )
         case other => other
@@ -216,12 +225,13 @@ object DynamoDBServiceLive:
         dynamo    <- ZIO.service[DynamoDb]
         readiness <- ZIO.service[ReadinessSignal]
         _ <- ZIO.logInfo(
-          s"Initialising DynamoDB client: region=${cfg.region} table=${cfg.tableName} endpoint=${cfg.endpoint.getOrElse("<aws-default>")} ttlAttribute=${cfg.ttlAttribute} ttlDays=${cfg.ttlDays}"
+          s"Initialising DynamoDB client: region=${cfg.region} table=${cfg.tableName} endpoint=${cfg.endpoint.getOrElse("<aws-default>")} " +
+            s"pullIndexKey=${cfg.pullIndexKey} versionFieldName=${cfg.versionFieldName} ttlAttribute=${cfg.ttlAttribute} ttlDays=${cfg.ttlDays}"
         )
         _ <- ensureTable(dynamo, cfg)
         _ <- readiness.markReady
         _ <- ZIO.logInfo("Persistence ready — readiness signal set")
-      yield DynamoDBServiceLive(dynamo, cfg.tableName, cfg.ttlAttribute, cfg.ttlDays)
+      yield DynamoDBServiceLive(dynamo, cfg)
     }
 
   val live: ZLayer[PersistenceProvider.DynamoDB & ReadinessSignal, Throwable, PersistenceService] =

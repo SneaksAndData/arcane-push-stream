@@ -1,6 +1,7 @@
 package arcane.ingestion.service
 
 import arcane.ingestion.api.v1.{IcebergColumnSpec, IcebergTableSpec}
+import arcane.ingestion.config.PersistenceProvider
 
 import org.apache.iceberg.types.Types
 import zio.*
@@ -74,6 +75,23 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
       initialProperties = initialProperties,
       jsonExpressionPointer = jsonExpressionPointer
     )
+
+  private val dynamoConfig = PersistenceProvider.DynamoDB(
+    pullIndexKey = "producer",
+    versionFieldName = "timestampUTC",
+    region = "eu-central-1",
+    tableName = "arcane-push-stream-tokens"
+  )
+
+  /** Properties seeded on a provisioned table. Defaults to the in-memory backend, which publishes no token-store
+    * coordinates, so a test only opts into them when that is what it asserts on.
+    */
+  private def propertiesOf(
+      spec: IcebergTableSpec,
+      producerId: String = "pt40-injection",
+      persistence: PersistenceProvider = PersistenceProvider.InMemory()
+  ): Map[String, String] =
+    IcebergProvisionerLive.initialProperties(spec, producerId, persistence)
 
   private def layoutOf(spec: IcebergTableSpec): Seq[(String, String)] =
     IcebergProvisionerLive
@@ -242,21 +260,21 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
       // arcane-stream-pull parses the whole comment as its watermark and refuses to start without one, so a table
       // provisioned without a comment would need a manual COMMENT ON before it could ever be consumed
       assertTrue(
-        IcebergProvisionerLive.initialProperties(specOf(Some(nestedRecordSchema))) ==
+        propertiesOf(specOf(Some(nestedRecordSchema))) ==
           Map("comment" -> """{"timestamp":"1970-01-01T00:00:00Z"}""")
       )
     },
     test("keeps a watermark comment the route declares itself") {
       val declared = """{"timestamp":"2026-01-01T00:00:00Z"}"""
       assertTrue(
-        IcebergProvisionerLive.initialProperties(
+        propertiesOf(
           specOf(Some(nestedRecordSchema), initialProperties = Map("comment" -> declared))
         ) == Map("comment" -> declared)
       )
     },
     test("seeds the watermark comment alongside other declared properties") {
       assertTrue(
-        IcebergProvisionerLive.initialProperties(
+        propertiesOf(
           specOf(Some(nestedRecordSchema), initialProperties = Map("owner" -> "data-platform"))
         ) == Map("owner" -> "data-platform", "comment" -> """{"timestamp":"1970-01-01T00:00:00Z"}""")
       )
@@ -414,20 +432,66 @@ object IcebergSchemaProvisioningSpec extends ZIOSpecDefault:
     },
     test("publishes the route's pointer on the table so the consumer can read it back") {
       assertTrue(
-        IcebergProvisionerLive.initialProperties(
+        propertiesOf(
           specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("/payload"))
         ) == Map(
-          "comment"                 -> """{"timestamp":"1970-01-01T00:00:00Z"}""",
-          "json-pointer-expression" -> "/payload"
+          "comment"                                           -> """{"timestamp":"1970-01-01T00:00:00Z"}""",
+          "arcane.plugin.push-stream.json-pointer-expression" -> "/payload"
         )
       )
     },
     test("publishes no pointer property for a route without one") {
       assertTrue(
-        !IcebergProvisionerLive.initialProperties(specOf(Some(nestedRecordSchema))).contains("json-pointer-expression"),
-        !IcebergProvisionerLive
-          .initialProperties(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("")))
-          .contains("json-pointer-expression")
+        !propertiesOf(specOf(Some(nestedRecordSchema))).contains(IcebergProvisionerLive.JsonPointerProperty),
+        !propertiesOf(specOf(Some(nestedRecordSchema), jsonExpressionPointer = Some("")))
+          .contains(IcebergProvisionerLive.JsonPointerProperty)
+      )
+    },
+    test("publishes the token store coordinates the consumer polls, under the plugin prefix") {
+      // the consumer has no configuration of its own for these: it reads them back off the table, so they must
+      // describe the store this service actually writes to
+      assertTrue(
+        propertiesOf(specOf(Some(nestedRecordSchema)), persistence = dynamoConfig) == Map(
+          "comment"                                       -> """{"timestamp":"1970-01-01T00:00:00Z"}""",
+          "arcane.plugin.push-stream.pull-index-key"      -> "producer",
+          "arcane.plugin.push-stream.pull-index-value"    -> "pt40-injection",
+          "arcane.plugin.push-stream.version-field-name"  -> "timestampUTC",
+          "arcane.plugin.push-stream.dynamodb-region"     -> "eu-central-1",
+          "arcane.plugin.push-stream.dynamodb-table-name" -> "arcane-push-stream-tokens"
+        )
+      )
+    },
+    test("publishes adjusted index and version attribute names rather than the defaults") {
+      val props = propertiesOf(
+        specOf(Some(nestedRecordSchema)),
+        persistence = dynamoConfig.copy(pullIndexKey = "producerKey", versionFieldName = "ingestedAt")
+      )
+
+      assertTrue(
+        props("arcane.plugin.push-stream.pull-index-key") == "producerKey",
+        props("arcane.plugin.push-stream.version-field-name") == "ingestedAt"
+      )
+    },
+    test("publishes the dynamodb endpoint only when one is configured") {
+      assertTrue(
+        !propertiesOf(specOf(Some(nestedRecordSchema)), persistence = dynamoConfig)
+          .contains(IcebergProvisionerLive.DynamoDbEndpointProperty),
+        propertiesOf(
+          specOf(Some(nestedRecordSchema)),
+          persistence = dynamoConfig.copy(endpoint = Some("http://localhost:8000"))
+        )(IcebergProvisionerLive.DynamoDbEndpointProperty) == "http://localhost:8000"
+      )
+    },
+    test("leaves the comment and route-declared properties unprefixed") {
+      // `comment` is Iceberg's own property and the declared ones belong to the table, not to this plugin
+      val props = propertiesOf(
+        specOf(Some(nestedRecordSchema), initialProperties = Map("owner" -> "data-platform")),
+        persistence = dynamoConfig
+      )
+
+      assertTrue(
+        props.filterNot(_._1.startsWith(IcebergProvisionerLive.PushStreamPropertyPrefix)).keySet ==
+          Set("comment", "owner")
       )
     },
     test("keeps a pointed-at record's own id, since the envelope it could collide with is dropped") {
