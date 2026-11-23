@@ -2,9 +2,9 @@ addSbtPlugin("org.scalameta"    % "sbt-scalafmt"         % "2.6.2")
 addSbtPlugin("com.eed3si9n"     % "sbt-assembly"         % "2.5.0")
 addSbtPlugin("org.scoverage"    % "sbt-scoverage"        % "2.4.4")
 addSbtPlugin("net.virtual-void" % "sbt-dependency-graph" % "0.9.2")
-addSbtPlugin("com.github.sbt"   % "sbt-native-packager"  % "1.11.7")
-addSbtPlugin("com.eed3si9n"     % "sbt-buildinfo"        % "0.13.1")
-addSbtPlugin("com.github.sbt"   % "sbt-dynver"           % "5.1.1")
+addSbtPlugin("com.github.sbt"   % "sbt-native-packager"  % "1.13.0")
+addSbtPlugin("com.eed3si9n"     % "sbt-buildinfo"        % "0.14.0")
+addSbtPlugin("com.github.sbt"   % "sbt-dynver"           % "5.2.0")
 addSbtPlugin("com.coralogix"    % "zio-k8s-crd"          % "3.2.1")
 
 // zio-k8s-crd runs Twilio guardrail (com.twilio:guardrail_2.12:0.64.1) to generate the
